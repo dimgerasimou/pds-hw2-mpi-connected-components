@@ -17,7 +17,6 @@
 #include <string.h>
 #include <omp.h>
 #include <mpi.h>
-#include <stdio.h>
 
 #include "connected_components.h"
 
@@ -191,11 +190,7 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 	uint32_t cols_per_rank = n / mpi_size;
 	uint32_t remainder = n % mpi_size;
 	uint32_t global_offset = mpi_rank * cols_per_rank + 
-	                         (mpi_rank < (int)remainder ? mpi_rank : remainder);
-	
-	/* Debug: verify partition matches loading */
-	fprintf(stderr, "[Rank %d Algorithm] n=%u, local_n=%u, global_offset=%u\n",
-	        mpi_rank, n, local_n, global_offset);
+	                         (mpi_rank < (int)remainder ? mpi_rank : (int)remainder);
 	
 	/* Allocate label arrays */
 	uint32_t *label = malloc(n * sizeof(uint32_t));
@@ -325,16 +320,6 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 		/* Update previous labels for next iteration */
 		memcpy(prev_label, label, n * sizeof(uint32_t));
 		
-		/* Progress reporting (rank 0 only) */
-		if (mpi_rank == 0 && iter % 10 == 0 && !converged) {
-			fprintf(stderr, "\rIteration %d...", iter);
-			fflush(stderr);
-		}
-	}
-	
-	if (mpi_rank == 0) {
-		fprintf(stderr, "\rConverged in iterations: %s\n",
-		        converged ? "yes" : "no (max reached)");
 	}
 	
 	/* Final compression pass on ALL vertices (needed for correctness) */
@@ -350,9 +335,6 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 		if (label[global_id] == global_id)
 			local_count++;
 	}
-	
-	fprintf(stderr, "[Rank %d] Counting vertices [%u, %u): found %u roots\n",
-	        mpi_rank, global_offset, global_offset + local_n, local_count);
 	
 	/* Sum component counts across all ranks */
 	uint32_t global_count = 0;

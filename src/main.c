@@ -20,7 +20,6 @@
 #include "args.h"
 #include "benchmark.h"
 
-#include <stdio.h>
 const char *program_name = "connected_components_mpi";
 
 int
@@ -37,7 +36,7 @@ main(int argc, char *argv[])
 	/* Initialize MPI with thread support */
 	MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &provided);
 	if (provided < MPI_THREAD_FUNNELED) {
-		fprintf(stderr, "Error: MPI does not support required threading level\n");
+		print_error(__func__, "MPI does not support required threading level\n", 0);
 		MPI_Abort(MPI_COMM_WORLD, 1);
 	}
 
@@ -60,7 +59,7 @@ main(int argc, char *argv[])
 	
 	if (!matrix) {
 		if (mpi_rank == 0) {
-			print_error("main", "Failed to load matrix", 0);
+			print_error(__func__, "Failed to load matrix", 0);
 		}
 		MPI_Finalize();
 		return 1;

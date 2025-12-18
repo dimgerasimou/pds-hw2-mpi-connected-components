@@ -546,7 +546,7 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		size_t cols_per_rank = ncols / mpi_size;
 		size_t remainder = ncols % mpi_size;
 		
-		size_t start_col = mpi_rank * cols_per_rank + (mpi_rank < (int)remainder ? mpi_rank : remainder);
+		size_t start_col = mpi_rank * cols_per_rank + (mpi_rank < (int)remainder ? mpi_rank : (int)remainder);
 		size_t end_col = start_col + cols_per_rank + (mpi_rank < (int)remainder ? 1 : 0);
 		size_t local_ncols = end_col - start_col;
 
