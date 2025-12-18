@@ -67,9 +67,6 @@ main(int argc, char *argv[])
 		return 1;
 	}
 
-	fprintf(stderr, "rank %d: nrows=%zu local_ncols=%zu global_ncols=%zu nnz=%zu\n",
-	        mpi_rank, matrix->nrows, matrix->ncols, matrix->ncols_global, matrix->nnz);
-
 	/* Initialize benchmarking structure (only rank 0 prints) */
 	benchmark = benchmark_init(filepath, n_trials, matrix);
 	if (!benchmark) {
