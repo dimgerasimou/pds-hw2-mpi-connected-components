@@ -56,6 +56,7 @@ typedef struct {
 	unsigned int rows;  /**< Number of rows in the matrix */
 	unsigned int cols;  /**< Number of columns in the matrix */
 	unsigned int nnz;   /**< Number of non-zero elements (edges in graph) */
+	double load_time_s; /**< Time it took to load the matrix in memory */
 } MatrixInfo;
 
 /**
@@ -81,6 +82,11 @@ typedef struct {
 	BenchmarkInfo benchmark_info; /**< Benchmark parameters */
 	Result result;                /**< Algorithm result */
 } Benchmark;
+
+/**
+ * @brief Returns current monotonic time in seconds.
+ */
+double now_sec(void);
 
 /**
  * @brief Initializes a benchmark structure.

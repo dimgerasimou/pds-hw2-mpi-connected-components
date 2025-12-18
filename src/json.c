@@ -32,7 +32,8 @@ print_matrix_info(const MatrixInfo *info, int indent_level)
 	printf("%*s\"path\": \"%s\",\n", indent_level + 2, "", info->path);
 	printf("%*s\"rows\": %u,\n", indent_level + 2, "", info->rows);
 	printf("%*s\"cols\": %u,\n", indent_level + 2, "", info->cols);
-	printf("%*s\"nnz\": %u\n", indent_level + 2, "", info->nnz);
+	printf("%*s\"nnz\": %u,\n", indent_level + 2, "", info->nnz);
+	printf("%*s\"load_time_s\": %lf\n", indent_level + 2, "", info->load_time_s);
 	printf("%*s}", indent_level, "");
 }
 

@@ -39,7 +39,9 @@ main(int argc, char *argv[])
 	}
 	
 	/* Load the sparse matrix */
+	double t_load_start = now_sec();
 	matrix = csc_load_matrix(filepath);
+	double t_load_end = now_sec();
 	if (!matrix)
 		return 1;
 
@@ -49,7 +51,7 @@ main(int argc, char *argv[])
 		csc_free_matrix(matrix);
 		return 1;
 	}
-
+	benchmark->matrix_info.load_time_s = t_load_end - t_load_start;
 	/* Actually run the benchmark */
 	ret = benchmark_cc(matrix, benchmark);
 

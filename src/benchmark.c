@@ -25,17 +25,6 @@
 /* ------------------------------------------------------------------------- */
 
 /**
- * @brief Returns current monotonic time in seconds.
- */
-static double
-now_sec(void)
-{
-	struct timespec t;
-	clock_gettime(CLOCK_MONOTONIC, &t);
-	return t.tv_sec + t.tv_nsec / 1e9;
-}
-
-/**
  * @brief Comparison function for sorting doubles.
  */
 static int
@@ -150,6 +139,17 @@ get_iso_timestamp(Benchmark *b)
 /* ------------------------------------------------------------------------- */
 /*                            Public API Implementation                      */
 /* ------------------------------------------------------------------------- */
+
+/**
+ * @brief Returns current monotonic time in seconds.
+ */
+double
+now_sec(void)
+{
+	struct timespec t;
+	clock_gettime(CLOCK_MONOTONIC, &t);
+	return t.tv_sec + t.tv_nsec / 1e9;
+}
 
 /**
  * @brief Initializes a benchmark structure.
