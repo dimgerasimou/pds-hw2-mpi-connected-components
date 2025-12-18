@@ -124,6 +124,16 @@ main(int argc, char **argv)
 	int is_pattern = (strcmp(field, "pattern") == 0);
 	int symmetric = (strcmp(symmetry, "symmetric") == 0);
 
+	if (!symmetric) {
+		fprintf(stderr,
+		        "Error: input MatrixMarket symmetry is \"%s\".\n"
+		        "This project expects an undirected graph (symmetric matrix).\n"
+		        "Please provide a symmetric .mtx or explicitly symmetrize the input.\n",
+		        symmetry);
+		fclose(fin);
+		return 1;
+	}
+
 	fprintf(stderr, "Format: %s, Field: %s, Symmetry: %s\n",
 	        format, field, symmetry);
 
