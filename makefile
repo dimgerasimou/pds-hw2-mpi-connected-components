@@ -1,10 +1,11 @@
 PROJECT := connected_components_mpi
 
-export CC := mpicc
+CC := mpicc
+GCC := gcc
 
-# Compiler flags: OpenMP + MPI
-CFLAGS := -Wall -Wextra -Wpedantic -std=c11 -O3 -march=native -Isrc -fopenmp
-LDFLAGS := -fopenmp -lm
+CFLAGS  := -Wall -Wextra -Wpedantic -std=c11 -O3 -Isrc -fopenmp
+LDFLAGS := -fopenmp
+LDLIBS  := -lm
 
 # Directories
 SRC_DIR := src
@@ -37,17 +38,18 @@ $(OBJ_DIR):
 
 $(TARGET): $(OBJS) | $(BIN_DIR)
 	@$(ECHO) "$(COLOR_GREEN)Linking (MPI+OpenMP):$(COLOR_RESET) $@"
-	@$(CC) $(LDFLAGS) $(OBJS) -o $@
+	@$(CC) $(OBJS) -o $@ $(LDFLAGS) $(LDLIBS)
 	@$(ECHO) "$(COLOR_CYAN)Build complete!$(COLOR_RESET)"
-	@$(ECHO) "$(COLOR_CYAN)Run with: mpirun -np N $(TARGET) -n trials input.bin$(COLOR_RESET)"
+	@$(ECHO) "$(COLOR_CYAN)Run with: srun ... $(TARGET) -n trials input.bin$(COLOR_RESET)"
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+.PHONY: converter
 converter: | $(BIN_DIR)
 	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) mtx_to_bin"
-	@gcc -Wall -Wextra -O3 -march=native -fopenmp src/converter/mtx_to_bin.c -o $(BIN_DIR)/mtx_to_bin -lm
+	@$(GCC) -Wall -Wextra -O3 -fopenmp src/converter/mtx_to_bin.c -o $(BIN_DIR)/mtx_to_bin -lm
 	@$(ECHO) "$(COLOR_GREEN)Converter built: $(BIN_DIR)/mtx_to_bin$(COLOR_RESET)"
 
 .PHONY: clean
@@ -71,10 +73,9 @@ help:
 	@echo "  help      - Show this message"
 	@echo ""
 	@echo "Usage:"
-	@echo "  Single node:  mpirun -np 1 $(TARGET) -n 3 input.bin"
-	@echo "  Multi-node:   mpirun -np 4 $(TARGET) -n 3 input.bin"
-	@echo "  SLURM:        sbatch run_slurm.sh"
+	@echo "  SLURM: sbatch run_slurm.sh"
 	@echo ""
 	@echo "Environment:"
-	@echo "  OMP_NUM_THREADS - OpenMP threads per rank (default: all cores)"
-	@echo "  OMP_PROC_BIND   - Thread affinity (recommended: spread)"
+	@echo "  OMP_NUM_THREADS - OpenMP threads per rank"
+	@echo "  OMP_PROC_BIND   - Thread affinity"
+
