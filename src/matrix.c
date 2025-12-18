@@ -9,12 +9,20 @@
  * Only binary matrices are represented. Any non-zero numeric values in
  * the input are treated as 1.
  */
+
+#define _POSIX_C_SOURCE 200809L
+#define _DEFAULT_SOURCE
+
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+#include <sys/mman.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -68,6 +76,208 @@ get_file_extension(const char *filename)
 	if (!dot || dot == filename)
 		return NULL;
 	return dot + 1;
+}
+
+static CSCBinaryMatrix*
+csc_load_binary_parallel(const char *filename)
+{
+	/* --- Open file with O_DIRECT hint for better performance ------- */
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0) {
+		print_error(__func__, "failed to open .bin file", errno);
+		return NULL;
+	}
+
+	CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
+	if (!m) {
+		print_error(__func__, "malloc failed", errno);
+		close(fd);
+		return NULL;
+	}
+
+	off_t offset = 0;
+
+	/* --- Read header (sequential, small) --------------------------- */
+	uint32_t nrows_u32, ncols_u32;
+	
+	if (read(fd, &nrows_u32, sizeof(uint32_t)) != sizeof(uint32_t) ||
+	    read(fd, &ncols_u32, sizeof(uint32_t)) != sizeof(uint32_t) ||
+	    read(fd, &m->nnz, sizeof(size_t)) != sizeof(size_t))
+	{
+		print_error(__func__, "failed to read header", errno);
+		free(m);
+		close(fd);
+		return NULL;
+	}
+
+	m->nrows = nrows_u32;
+	m->ncols = ncols_u32;
+	offset = sizeof(uint32_t) * 2 + sizeof(size_t);
+
+	/* --- Read col_ptr (sequential, relatively small) --------------- */
+	m->col_ptr = malloc((m->ncols + 1) * sizeof(uint32_t));
+	if (!m->col_ptr) {
+		print_error(__func__, "malloc failed for col_ptr", errno);
+		free(m);
+		close(fd);
+		return NULL;
+	}
+
+	size_t col_ptr_bytes = (m->ncols + 1) * sizeof(uint32_t);
+	if (read(fd, m->col_ptr, col_ptr_bytes) != (ssize_t)col_ptr_bytes) {
+		print_error(__func__, "failed to read col_ptr", errno);
+		csc_free_matrix(m);
+		close(fd);
+		return NULL;
+	}
+	offset += col_ptr_bytes;
+
+	/* --- Allocate row_idx ------------------------------------------ */
+	m->row_idx = malloc(m->nnz * sizeof(uint32_t));
+	if (!m->row_idx) {
+		print_error(__func__, "malloc failed for row_idx", errno);
+		csc_free_matrix(m);
+		close(fd);
+		return NULL;
+	}
+
+	/* --- Parallel read of row_idx using pread ---------------------- */
+	int n_threads = omp_get_max_threads();
+	size_t chunk_size = (m->nnz + n_threads - 1) / n_threads;
+	
+	int read_error = 0;
+
+	#pragma omp parallel
+	{
+		int tid = omp_get_thread_num();
+		size_t start = tid * chunk_size;
+		size_t end = start + chunk_size;
+		if (end > m->nnz)
+			end = m->nnz;
+
+		if (start < end) {
+			size_t count = end - start;
+			off_t file_offset = offset + start * sizeof(uint32_t);
+			size_t bytes_to_read = count * sizeof(uint32_t);
+
+			/* pread is thread-safe: each thread reads from different offset */
+			ssize_t bytes_read = pread(fd, &m->row_idx[start],
+			                           bytes_to_read, file_offset);
+
+			if (bytes_read != (ssize_t)bytes_to_read) {
+				#pragma omp atomic write
+				read_error = 1;
+			}
+		}
+	}
+
+	close(fd);
+
+	if (read_error) {
+		print_error(__func__, "parallel read failed", errno);
+		csc_free_matrix(m);
+		return NULL;
+	}
+
+	return m;
+}
+
+/**
+ * @brief Load CSC matrix using memory-mapped I/O with parallel access.
+ *
+ * This is often the fastest method as the OS handles paging automatically.
+ * Multiple threads can read from the mapped region simultaneously.
+ *
+ * @param filename Path to the .bin file.
+ * @return Newly allocated CSCBinaryMatrix on success, NULL on error.
+ */
+static CSCBinaryMatrix*
+csc_load_binary_mmap(const char *filename)
+{
+	/* --- Open and get file size ------------------------------------ */
+	int fd = open(filename, O_RDONLY);
+	if (fd < 0) {
+		print_error(__func__, "failed to open .bin file", errno);
+		return NULL;
+	}
+
+	struct stat sb;
+	if (fstat(fd, &sb) < 0) {
+		print_error(__func__, "fstat failed", errno);
+		close(fd);
+		return NULL;
+	}
+
+	/* --- Memory-map the entire file -------------------------------- */
+	void *mapped = mmap(NULL, sb.st_size, PROT_READ,
+	                    MAP_PRIVATE | MAP_POPULATE, fd, 0);
+	
+	if (mapped == MAP_FAILED) {
+		print_error(__func__, "mmap failed", errno);
+		close(fd);
+		return NULL;
+	}
+
+	/* Advise kernel we'll read sequentially, then randomly */
+	madvise(mapped, sb.st_size, MADV_SEQUENTIAL);
+	madvise(mapped, sb.st_size, MADV_WILLNEED);
+
+	/* --- Parse header ---------------------------------------------- */
+	uint8_t *ptr = (uint8_t *)mapped;
+	uint32_t nrows_u32, ncols_u32;
+	size_t nnz;
+
+	memcpy(&nrows_u32, ptr, sizeof(uint32_t));
+	ptr += sizeof(uint32_t);
+	
+	memcpy(&ncols_u32, ptr, sizeof(uint32_t));
+	ptr += sizeof(uint32_t);
+	
+	memcpy(&nnz, ptr, sizeof(size_t));
+	ptr += sizeof(size_t);
+
+	/* --- Allocate CSC structure ------------------------------------ */
+	CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
+	if (!m) {
+		print_error(__func__, "malloc failed", errno);
+		munmap(mapped, sb.st_size);
+		close(fd);
+		return NULL;
+	}
+
+	m->nrows = nrows_u32;
+	m->ncols = ncols_u32;
+	m->nnz = nnz;
+
+	m->col_ptr = malloc((m->ncols + 1) * sizeof(uint32_t));
+	m->row_idx = malloc(m->nnz * sizeof(uint32_t));
+
+	if (!m->col_ptr || !m->row_idx) {
+		print_error(__func__, "malloc failed for arrays", errno);
+		csc_free_matrix(m);
+		munmap(mapped, sb.st_size);
+		close(fd);
+		return NULL;
+	}
+
+	/* --- Copy col_ptr (sequential) --------------------------------- */
+	size_t col_ptr_bytes = (m->ncols + 1) * sizeof(uint32_t);
+	memcpy(m->col_ptr, ptr, col_ptr_bytes);
+	ptr += col_ptr_bytes;
+
+	/* --- Copy row_idx in parallel ---------------------------------- */
+	uint32_t *src_row_idx = (uint32_t *)ptr;
+	
+	#pragma omp parallel for schedule(static)
+	for (size_t i = 0; i < m->nnz; i++) {
+		m->row_idx[i] = src_row_idx[i];
+	}
+
+	/* --- Cleanup --------------------------------------------------- */
+	munmap(mapped, sb.st_size);
+	close(fd);
+
+	return m;
 }
 
 /**
@@ -462,11 +672,13 @@ fail_raw:
 /* ------------------------------------------------------------------------- */
 
 /**
- * @brief Load a CSC matrix from file (auto-detects format by extension).
+ * @brief Load a CSC matrix from file (auto-detects format and uses best method).
  *
- * Supports:
- * - .bin files: fast binary format
- * - .mtx files: Matrix Market format (uses parallel loading if OpenMP enabled)
+ * For .bin files, automatically uses parallel loading:
+ *   - mmap with parallel copy (usually fastest)
+ *   - Falls back to pread if mmap fails
+ *
+ * For .mtx files, uses parallel MTX loading if OpenMP is enabled.
  *
  * @param filename Path to the matrix file.
  * @return Newly allocated CSCBinaryMatrix on success, NULL on error.
@@ -480,10 +692,18 @@ csc_load_matrix(const char *filename)
 		return NULL;
 	}
 
-	if (strcmp(ext, "bin") == 0)
-		return csc_load_binary(filename);
-	else if (strcmp(ext, "mtx") == 0)
+	if (strcmp(ext, "bin") == 0) {
+		/* Try mmap first (usually fastest) */
+		CSCBinaryMatrix *m = csc_load_binary_mmap(filename);
+		if (!m) {
+			/* Fall back to parallel pread */
+			m = csc_load_binary_parallel(filename);
+		}
+		return m;
+	}
+	else if (strcmp(ext, "mtx") == 0) {
 		return csc_load_mtx(filename);
+	}
 	else {
 		print_error(__func__, "unsupported file extension", 0);
 		return NULL;
