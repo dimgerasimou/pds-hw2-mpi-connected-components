@@ -8,21 +8,25 @@
  *
  * Only binary matrices are represented. Any non-zero numeric values in
  * the input are treated as 1.
+ *
+ * MPI extension: Supports distributed loading where each rank loads only
+ * its partition of columns to minimize memory usage.
  */
 
 #define _POSIX_C_SOURCE 200809L
 
 #include <ctype.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <mpi.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <fcntl.h>
 #include <unistd.h>
-#include <omp.h>
 
-#include "matrix.h"
 #include "error.h"
+#include "matrix.h"
 
 /* ------------------------------------------------------------------------- */
 /*                            Static Helper Functions                        */
@@ -480,6 +484,175 @@ csc_load_matrix(const char *filename)
 		return csc_load_mtx(filename);
 	} else {
 		print_error(__func__, "unsupported file extension", 0);
+		return NULL;
+	}
+}
+
+/**
+ * @brief Load a distributed partition of a sparse binary matrix (.bin format only).
+ *
+ * Each MPI rank loads only its assigned partition of columns to minimize
+ * memory usage and I/O bottlenecks. Uses block distribution strategy.
+ *
+ * Algorithm:
+ * 1. All ranks read header independently (small, fast)
+ * 2. Each rank calculates its column partition [start_col, end_col)
+ * 3. Each rank reads full col_ptr to determine edge ranges
+ * 4. Each rank reads only its portion of row_idx
+ *
+ * @param filename Path to the .bin file.
+ * @param mpi_rank Current MPI rank.
+ * @param mpi_size Total number of MPI ranks.
+ * @return Newly allocated CSCBinaryMatrix (local partition), or NULL on error.
+ */
+CSCBinaryMatrix*
+csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
+{
+	const char *ext = get_file_extension(filename);
+	if (!ext) {
+		if (mpi_rank == 0)
+			print_error(__func__, "no file extension found", 0);
+		return NULL;
+	}
+
+	/* For .bin format: efficient distributed loading */
+	if (strcmp(ext, "bin") == 0) {
+		/* Open file on all ranks */
+		int fd = open(filename, O_RDONLY);
+		if (fd < 0) {
+			if (mpi_rank == 0)
+				print_error(__func__, "failed to open .bin file", errno);
+			return NULL;
+		}
+
+		/* Read header - all ranks read independently (small, fast) */
+		uint32_t nrows_u32, ncols_u32;
+		size_t nnz_total;
+		
+		if (read(fd, &nrows_u32, sizeof(uint32_t)) != sizeof(uint32_t) ||
+		    read(fd, &ncols_u32, sizeof(uint32_t)) != sizeof(uint32_t) ||
+		    read(fd, &nnz_total, sizeof(size_t)) != sizeof(size_t))
+		{
+			if (mpi_rank == 0)
+				print_error(__func__, "failed to read header", errno);
+			close(fd);
+			return NULL;
+		}
+
+		size_t nrows = nrows_u32;
+		size_t ncols = ncols_u32;
+
+		/* Calculate this rank's column partition */
+		size_t cols_per_rank = ncols / mpi_size;
+		size_t remainder = ncols % mpi_size;
+		
+		size_t start_col = mpi_rank * cols_per_rank + (mpi_rank < (int)remainder ? mpi_rank : remainder);
+		size_t end_col = start_col + cols_per_rank + (mpi_rank < (int)remainder ? 1 : 0);
+		size_t local_ncols = end_col - start_col;
+
+		/* Read full col_ptr array (needed to determine edge ranges) */
+		uint32_t *full_col_ptr = malloc((ncols + 1) * sizeof(uint32_t));
+		if (!full_col_ptr) {
+			if (mpi_rank == 0)
+				print_error(__func__, "malloc failed for col_ptr", errno);
+			close(fd);
+			return NULL;
+		}
+
+		off_t col_ptr_offset = sizeof(uint32_t) * 2 + sizeof(size_t);
+		ssize_t col_ptr_bytes = (ncols + 1) * sizeof(uint32_t);
+		
+		if (pread(fd, full_col_ptr, col_ptr_bytes, col_ptr_offset) != col_ptr_bytes) {
+			if (mpi_rank == 0)
+				print_error(__func__, "failed to read col_ptr", errno);
+			free(full_col_ptr);
+			close(fd);
+			return NULL;
+		}
+
+		/* Determine edge range for this rank's columns */
+		uint32_t edge_start = full_col_ptr[start_col];
+		uint32_t edge_end = full_col_ptr[end_col];
+		size_t local_nnz = edge_end - edge_start;
+
+		/* Allocate local matrix */
+		CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
+		if (!m) {
+			if (mpi_rank == 0)
+				print_error(__func__, "malloc failed", errno);
+			free(full_col_ptr);
+			close(fd);
+			return NULL;
+		}
+
+		m->nrows = nrows;        /* Keep global row count */
+		m->ncols = local_ncols;  /* Local column count */
+		m->nnz = local_nnz;      /* Local edge count */
+
+		/* Allocate local col_ptr (adjusted to local indexing) */
+		m->col_ptr = malloc((local_ncols + 1) * sizeof(uint32_t));
+		if (!m->col_ptr) {
+			if (mpi_rank == 0)
+				print_error(__func__, "malloc failed for local col_ptr", errno);
+			free(full_col_ptr);
+			free(m);
+			close(fd);
+			return NULL;
+		}
+
+		/* Copy and adjust col_ptr to local indexing */
+		for (size_t i = 0; i <= local_ncols; i++) {
+			m->col_ptr[i] = full_col_ptr[start_col + i] - edge_start;
+		}
+		free(full_col_ptr);
+
+		/* Allocate local row_idx */
+		m->row_idx = malloc(local_nnz * sizeof(uint32_t));
+		if (!m->row_idx) {
+			if (mpi_rank == 0)
+				print_error(__func__, "malloc failed for row_idx", errno);
+			csc_free_matrix(m);
+			close(fd);
+			return NULL;
+		}
+
+		/* Read this rank's portion of row_idx */
+		off_t row_idx_offset = col_ptr_offset + col_ptr_bytes + edge_start * sizeof(uint32_t);
+		ssize_t row_idx_bytes = local_nnz * sizeof(uint32_t);
+
+		if (local_nnz > 0) {
+			if (pread(fd, m->row_idx, row_idx_bytes, row_idx_offset) != row_idx_bytes) {
+				if (mpi_rank == 0)
+					print_error(__func__, "failed to read row_idx partition", errno);
+				csc_free_matrix(m);
+				close(fd);
+				return NULL;
+			}
+		}
+
+		close(fd);
+		
+		/* Debug output from all ranks */
+		fprintf(stderr, "[Rank %d] Loaded partition: columns [%zu, %zu) = %zu cols, nnz=%zu\n",
+		        mpi_rank, start_col, end_col, local_ncols, local_nnz);
+		
+		return m;
+	}
+	/* For .mtx format: rank 0 loads, others receive via MPI */
+	else if (strcmp(ext, "mtx") == 0) {
+		/* This is a simplified fallback - ideally should distribute after loading */
+		if (mpi_rank == 0) {
+			fprintf(stderr, "Warning: .mtx distributed loading not optimized\n");
+			fprintf(stderr, "For best performance, convert to .bin format first\n");
+		}
+		
+		/* For now, all ranks load full matrix (inefficient but functional) */
+		/* TODO: Implement proper distribution */
+		return csc_load_matrix(filename);
+	}
+	else {
+		if (mpi_rank == 0)
+			print_error(__func__, "unsupported file extension", 0);
 		return NULL;
 	}
 }

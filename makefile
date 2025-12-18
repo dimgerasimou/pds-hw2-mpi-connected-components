@@ -1,8 +1,9 @@
 PROJECT := connected_components_mpi
 
-export CC := gcc
+export CC := mpicc
 
-CFLAGS := -Wall -Wextra -Wpedantic -std=c11 -O3 -march=native -Isrc/core -Isrc/algorithms -Isrc/utils -fopenmp
+# Compiler flags: OpenMP + MPI
+CFLAGS := -Wall -Wextra -Wpedantic -std=c11 -O3 -march=native -Isrc -fopenmp
 LDFLAGS := -fopenmp -lm
 
 # Directories
@@ -35,8 +36,10 @@ $(OBJ_DIR):
 	@mkdir -p $(OBJ_DIR)
 
 $(TARGET): $(OBJS) | $(BIN_DIR)
-	@$(ECHO) "$(COLOR_GREEN)Linking:$(COLOR_RESET) $@"
+	@$(ECHO) "$(COLOR_GREEN)Linking (MPI+OpenMP):$(COLOR_RESET) $@"
 	@$(CC) $(LDFLAGS) $(OBJS) -o $@
+	@$(ECHO) "$(COLOR_CYAN)Build complete!$(COLOR_RESET)"
+	@$(ECHO) "$(COLOR_CYAN)Run with: mpirun -np N $(TARGET) -n trials input.bin$(COLOR_RESET)"
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) $<"
@@ -44,8 +47,8 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 
 converter: | $(BIN_DIR)
 	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) mtx_to_bin"
-	@gcc $(CFLAGS) $(LDFLAGS) $(SRC_DIR)/converter/mtx_to_bin.c -o $(BIN_DIR)/mtx_to_bin
-
+	@gcc -Wall -Wextra -O3 -march=native -fopenmp src/converter/mtx_to_bin.c -o $(BIN_DIR)/mtx_to_bin -lm
+	@$(ECHO) "$(COLOR_GREEN)Converter built: $(BIN_DIR)/mtx_to_bin$(COLOR_RESET)"
 
 .PHONY: clean
 clean:
@@ -56,3 +59,22 @@ clean:
 .PHONY: rebuild
 rebuild: clean all
 
+.PHONY: help
+help:
+	@echo "Hybrid MPI+OpenMP Connected Components"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all       - Build MPI+OpenMP version (default)"
+	@echo "  converter - Build mtx_to_bin utility"
+	@echo "  clean     - Remove build artifacts"
+	@echo "  rebuild   - Clean and rebuild"
+	@echo "  help      - Show this message"
+	@echo ""
+	@echo "Usage:"
+	@echo "  Single node:  mpirun -np 1 $(TARGET) -n 3 input.bin"
+	@echo "  Multi-node:   mpirun -np 4 $(TARGET) -n 3 input.bin"
+	@echo "  SLURM:        sbatch run_slurm.sh"
+	@echo ""
+	@echo "Environment:"
+	@echo "  OMP_NUM_THREADS - OpenMP threads per rank (default: all cores)"
+	@echo "  OMP_PROC_BIND   - Thread affinity (recommended: spread)"

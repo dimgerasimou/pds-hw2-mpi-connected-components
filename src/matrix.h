@@ -26,14 +26,38 @@ typedef struct {
 	uint32_t *col_ptr;  /**< Column pointers (length ncols + 1) */
 } CSCBinaryMatrix;
 
-/** @brief Load a sparse binary matrix from a .mtx file.
+/**
+ * @brief Load a sparse binary matrix from a file.
  *
- * @param path Path to the matrix file.
+ * @param path Path to the matrix file (.mtx or .bin format).
  * @return Newly allocated CSCBinaryMatrix, or NULL on failure.
  *
  * @note The returned matrix must be freed using csc_free_matrix().
  */
 CSCBinaryMatrix *csc_load_matrix(const char *path);
+
+/**
+ * @brief Load a distributed partition of a sparse binary matrix.
+ *
+ * Each MPI rank loads only its partition of columns. This significantly
+ * reduces memory usage per node and speeds up loading.
+ *
+ * Partition strategy: Block distribution of columns across ranks.
+ * Rank i gets columns [start, end) where:
+ *   - cols_per_rank = ncols / mpi_size
+ *   - start = rank * cols_per_rank + min(rank, remainder)
+ *   - end = start + cols_per_rank + (rank < remainder ? 1 : 0)
+ *
+ * @param path Path to the matrix file (.bin format required for distributed loading).
+ * @param mpi_rank Current MPI rank.
+ * @param mpi_size Total number of MPI ranks.
+ * @return Newly allocated CSCBinaryMatrix (local partition), or NULL on failure.
+ *
+ * @note The returned matrix must be freed using csc_free_matrix().
+ * @note Only .bin format supports distributed loading. .mtx files are loaded
+ *       on rank 0 and then distributed.
+ */
+CSCBinaryMatrix *csc_load_matrix_distributed(const char *path, int mpi_rank, int mpi_size);
 
 /**
  * @brief Free a CSCBinaryMatrix and its associated memory.

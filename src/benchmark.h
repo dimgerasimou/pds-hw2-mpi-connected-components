@@ -1,3 +1,8 @@
+/**
+ * @file benchmark.h
+ * @brief Benchmarking framework for parallel algorithms with MPI support.
+ */
+
 #ifndef BENCHMARK_H
 #define BENCHMARK_H
 
@@ -66,10 +71,10 @@ typedef struct {
  * Contains the configuration parameters used for running the benchmark.
  */
 typedef struct {
-	unsigned int threads;  /**< Number of threads used for parallel execution */
-	// unsigned int mpi_nodes;
-	// unsigned int mpi_rank_per_node;
-	unsigned int trials;   /**< Number of benchmark trials performed */
+	unsigned int threads;     /**< Number of OpenMP threads per process */
+	unsigned int mpi_ranks;   /**< Number of MPI ranks (processes) */
+	unsigned int mpi_rank;    /**< Current MPI rank ID */
+	unsigned int trials;      /**< Number of benchmark trials performed */
 } BenchmarkInfo;
 
 /**
@@ -94,7 +99,6 @@ double now_sec(void);
  * Allocates and populates a new Benchmark instance for the specified
  * algorithm and dataset. Also allocates memory for timing results.
  *
- * @param name Name of the algorithm being benchmarked.
  * @param filepath Path to the dataset file.
  * @param n_trials Number of trials to run.
  * @param mat Pointer to the CSCBinaryMatrix used as input.
@@ -111,7 +115,7 @@ Benchmark* benchmark_init(const char *filepath, const unsigned int n_trials, con
 void benchmark_free(Benchmark *b);
 
 /**
- * @brief Runs a connected components benchmark.
+ * @brief Runs a connected components benchmark (single-process version).
  *
  * Executes the provided connected components function multiple times,
  * measuring execution time per trial and verifying consistency of results.
@@ -125,6 +129,23 @@ void benchmark_free(Benchmark *b);
  * - `2` if results differ between trials.
  */
 int benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b);
+
+/**
+ * @brief Runs a connected components benchmark (MPI version).
+ *
+ * MPI-aware version that synchronizes timing across ranks and aggregates results.
+ *
+ * @param m Input CSCBinaryMatrix (local partition).
+ * @param b Benchmark object containing configuration and result storage.
+ * @param mpi_rank Current MPI rank.
+ * @param mpi_size Total number of MPI ranks.
+ *
+ * @return
+ * - `0` on success,
+ * - `1` on algorithm failure or invalid data,
+ * - `2` if results differ between trials.
+ */
+int benchmark_cc_mpi(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size);
 
 /**
  * @brief Prints benchmark results in structured JSON format.

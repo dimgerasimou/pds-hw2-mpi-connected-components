@@ -44,7 +44,9 @@ void
 print_benchmark_info(const BenchmarkInfo *info, int indent_level)
 {
 	printf("%*s\"benchmark_info\": {\n", indent_level, "");
-	printf("%*s\"threads\": %u,\n", indent_level + 2, "", info->threads);
+	printf("%*s\"threads_per_rank\": %u,\n", indent_level + 2, "", info->threads);
+	printf("%*s\"mpi_ranks\": %u,\n", indent_level + 2, "", info->mpi_ranks);
+	printf("%*s\"total_cores\": %u,\n", indent_level + 2, "", info->threads * info->mpi_ranks);
 	printf("%*s\"trials\": %u\n", indent_level + 2, "", info->trials);
 	printf("%*s}", indent_level, "");
 }
@@ -64,6 +66,6 @@ print_result(const Result *result, int indent_level)
 	printf("%*s\"min_time_s\": %.6f,\n", indent_level + 4, "", result->stats.min_time_s);
 	printf("%*s\"max_time_s\": %.6f\n", indent_level + 4, "", result->stats.max_time_s);
 	printf("%*s},\n", indent_level + 2, "");
-	printf("%*s\"throughput_edges_per_sec\": %.2f,\n", indent_level + 2, "", result->throughput_edges_per_sec);
+	printf("%*s\"throughput_edges_per_sec\": %.2f\n", indent_level + 2, "", result->throughput_edges_per_sec);
 	printf("%*s}", indent_level, "");
 }

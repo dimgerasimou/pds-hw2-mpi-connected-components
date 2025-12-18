@@ -1,23 +1,26 @@
 /**
  * @file benchmark.c
  * @brief Implementation of benchmarking framework for parallel algorithms.
+ *
+ * Supports both single-process (OpenMP) and multi-process (MPI+OpenMP) benchmarking.
  */
 
 #define _POSIX_C_SOURCE 200809L
 
 #include <errno.h>
 #include <math.h>
+#include <mpi.h>
+#include <omp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
-#include <sys/sysinfo.h>
 #include <sys/resource.h>
-#include <omp.h>
+#include <sys/sysinfo.h>
+#include <time.h>
 
-#include "error.h"
 #include "benchmark.h"
 #include "connected_components.h"
+#include "error.h"
 #include "json.h"
 
 /* ------------------------------------------------------------------------- */
@@ -157,7 +160,6 @@ now_sec(void)
  * Allocates and populates a new Benchmark instance for the specified
  * algorithm and dataset. Also allocates memory for timing results.
  *
- * @param name Name of the algorithm being benchmarked.
  * @param filepath Path to the dataset file.
  * @param n_trials Number of trials to run.
  * @param mat Pointer to the CSCBinaryMatrix used as input.
@@ -192,6 +194,8 @@ benchmark_init(const char *filepath, const unsigned int n_trials, const CSCBinar
 		b->benchmark_info.threads = omp_get_num_threads();
 	}
 	b->benchmark_info.trials  = n_trials;
+	b->benchmark_info.mpi_ranks = 1;  /* Default for non-MPI */
+	b->benchmark_info.mpi_rank = 0;
 
 	b->times = NULL;
 
@@ -219,7 +223,7 @@ benchmark_free(Benchmark *b)
 }
 
 /**
- * @brief Runs a connected components benchmark.
+ * @brief Runs a connected components benchmark (single-process version).
  *
  * Executes the provided connected components function multiple times,
  * measuring execution time per trial and verifying consistency of results.
@@ -250,6 +254,71 @@ benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b)
 
 		if (result != b->result.connected_components) {
 			printf("Components between retries don't match\n");
+			return 2;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * @brief Runs a connected components benchmark (MPI version).
+ *
+ * MPI-aware version that synchronizes timing across ranks and aggregates results.
+ * Uses MPI_Barrier for synchronization before and after each trial to ensure
+ * accurate timing measurements.
+ *
+ * @param m Input CSCBinaryMatrix (local partition).
+ * @param b Benchmark object containing configuration and result storage.
+ * @param mpi_rank Current MPI rank.
+ * @param mpi_size Total number of MPI ranks.
+ *
+ * @return
+ * - `0` on success,
+ * - `1` on algorithm failure or invalid data,
+ * - `2` if results differ between trials.
+ */
+int
+benchmark_cc_mpi(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size)
+{
+	long result;
+
+	for (unsigned int i = 0; i < b->benchmark_info.trials; i++) {
+		/* Synchronize all ranks before starting */
+		MPI_Barrier(MPI_COMM_WORLD);
+		
+		double start_time = now_sec();
+		result = connected_components_mpi(m, mpi_rank, mpi_size);
+		double end_time = now_sec();
+		
+		/* Synchronize all ranks after finishing */
+		MPI_Barrier(MPI_COMM_WORLD);
+		
+		/* Use the maximum time across all ranks for accurate measurement */
+		double local_time = end_time - start_time;
+		double max_time;
+		MPI_Reduce(&local_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 
+		           0, MPI_COMM_WORLD);
+		
+		if (mpi_rank == 0) {
+			b->times[i] = max_time;
+		}
+
+		if (result < 0) {
+			if (mpi_rank == 0) {
+				fprintf(stderr, "Algorithm returned error\n");
+			}
+			return 1;
+		}
+		
+		if (i == 0) {
+			b->result.connected_components = result;
+		}
+
+		if (result != b->result.connected_components) {
+			if (mpi_rank == 0) {
+				printf("Components between retries don't match\n");
+			}
 			return 2;
 		}
 	}
