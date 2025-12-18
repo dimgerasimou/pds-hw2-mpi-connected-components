@@ -2,14 +2,12 @@
 #SBATCH --partition=rome
 #SBATCH --time=00:10:00
 #SBATCH --job-name=Connected-Components-Detection-OpenMPI+OpenMP
-#SBATCH --output=becnhmarks/rome-8-16-%j.json
+#SBATCH --output=benchmarks/rome-8-16-%j.json
 #SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
 
 module load gcc openmpi
-
-mkdir -p benchmarks
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=close
