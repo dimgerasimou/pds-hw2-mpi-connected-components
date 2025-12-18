@@ -1,3 +1,4 @@
+
 /**
  * @file matrix.c
  * @brief CSC (Compressed Sparse Column) binary matrix utilities.
@@ -23,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "error.h"
@@ -31,6 +33,72 @@
 /* ------------------------------------------------------------------------- */
 /*                            Static Helper Functions                        */
 /* ------------------------------------------------------------------------- */
+
+/**
+ * @brief Robust pread() wrapper that reads exactly @p nbytes bytes.
+ *
+ * Some parallel/distributed filesystems can transiently return EAGAIN,
+ * EINTR, or short reads under load. This helper retries with exponential
+ * backoff (bounded) and continues until all bytes are read or a hard error
+ * occurs.
+ *
+ * @param fd File descriptor.
+ * @param buf Destination buffer.
+ * @param nbytes Number of bytes to read.
+ * @param offset File offset.
+ * @return 0 on success, -1 on failure with errno set.
+ */
+static int
+pread_full(int fd, void *buf, size_t nbytes, off_t offset)
+{
+	unsigned char *p = (unsigned char *)buf;
+	size_t done = 0;
+	int retries = 0;
+
+	/* Tunables: keep small but sufficient for shared FS hiccups */
+	const int MAX_RETRIES = 20;
+	const long BASE_BACKOFF_MS = 5;   /* 5ms */
+	const long MAX_BACKOFF_MS  = 500; /* 0.5s per retry cap */
+
+	while (done < nbytes) {
+		ssize_t r = pread(fd, p + done, nbytes - done, offset + (off_t)done);
+
+		if (r > 0) {
+			done += (size_t)r;
+			continue;
+		}
+
+		if (r == 0) {
+			/* Unexpected EOF: file truncated or wrong offsets */
+			errno = EIO;
+			return -1;
+		}
+
+		/* r < 0 */
+		if (errno == EINTR) {
+			continue;
+		}
+
+		if (errno == EAGAIN) {
+			if (++retries > MAX_RETRIES)
+				return -1;
+
+			long backoff = BASE_BACKOFF_MS << (retries < 10 ? retries : 10);
+			if (backoff > MAX_BACKOFF_MS)
+				backoff = MAX_BACKOFF_MS;
+
+			struct timespec ts;
+			ts.tv_sec = backoff / 1000;
+			ts.tv_nsec = (backoff % 1000) * 1000000L;
+			nanosleep(&ts, NULL);
+			continue;
+		}
+
+		return -1;
+	}
+
+	return 0;
+}
 
 /**
  * @brief Skip comments and blank lines in a Matrix Market file.
@@ -127,7 +195,7 @@ csc_load_bin(const char *filename)
 		close(fd);
 		return NULL;
 	}
-	offset += col_ptr_bytes;
+	offset += (off_t)col_ptr_bytes;
 
 	/* --- Allocate row_idx ------------------------------------------ */
 	m->row_idx = malloc(m->nnz * sizeof(uint32_t));
@@ -138,32 +206,35 @@ csc_load_bin(const char *filename)
 		return NULL;
 	}
 
-	/* --- Parallel read of row_idx using pread ---------------------- */
+	/* --- Parallel read of row_idx using robust pread ---------------- */
 	int n_threads = omp_get_max_threads();
-	size_t chunk_size = (m->nnz + n_threads - 1) / n_threads;
+	size_t chunk_size = (m->nnz + (size_t)n_threads - 1) / (size_t)n_threads;
 	
 	int read_error = 0;
+	int saved_errno = 0;
 
 	#pragma omp parallel
 	{
 		int tid = omp_get_thread_num();
-		size_t start = tid * chunk_size;
+		size_t start = (size_t)tid * chunk_size;
 		size_t end = start + chunk_size;
 		if (end > m->nnz)
 			end = m->nnz;
 
 		if (start < end) {
 			size_t count = end - start;
-			off_t file_offset = offset + start * sizeof(uint32_t);
+			off_t file_offset = offset + (off_t)(start * sizeof(uint32_t));
 			size_t bytes_to_read = count * sizeof(uint32_t);
 
-			/* pread is thread-safe: each thread reads from different offset */
-			ssize_t bytes_read = pread(fd, &m->row_idx[start],
-			                           bytes_to_read, file_offset);
-
-			if (bytes_read != (ssize_t)bytes_to_read) {
+			if (pread_full(fd, &m->row_idx[start], bytes_to_read, file_offset) != 0) {
 				#pragma omp atomic write
 				read_error = 1;
+
+				#pragma omp critical
+				{
+					if (!saved_errno)
+						saved_errno = errno;
+				}
 			}
 		}
 	}
@@ -171,6 +242,8 @@ csc_load_bin(const char *filename)
 	close(fd);
 
 	if (read_error) {
+		if (saved_errno)
+			errno = saved_errno;
 		print_error(__func__, "parallel read failed", errno);
 		csc_free_matrix(m);
 		return NULL;
@@ -562,7 +635,7 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		off_t col_ptr_offset = sizeof(uint32_t) * 2 + sizeof(size_t);
 		ssize_t col_ptr_bytes = (ncols + 1) * sizeof(uint32_t);
 		
-		if (pread(fd, full_col_ptr, col_ptr_bytes, col_ptr_offset) != col_ptr_bytes) {
+		if (pread_full(fd, full_col_ptr, (size_t)col_ptr_bytes, col_ptr_offset) != 0) {
 			if (mpi_rank == 0)
 				print_error(__func__, "failed to read col_ptr", errno);
 			free(full_col_ptr);
@@ -573,7 +646,7 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		/* Determine edge range for this rank's columns */
 		uint32_t edge_start = full_col_ptr[start_col];
 		uint32_t edge_end = full_col_ptr[end_col];
-		size_t local_nnz = edge_end - edge_start;
+		size_t local_nnz = (size_t)(edge_end - edge_start);
 
 		/* Allocate local matrix */
 		CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
@@ -617,11 +690,11 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		}
 
 		/* Read this rank's portion of row_idx */
-		off_t row_idx_offset = col_ptr_offset + col_ptr_bytes + edge_start * sizeof(uint32_t);
-		ssize_t row_idx_bytes = local_nnz * sizeof(uint32_t);
+		off_t row_idx_offset = col_ptr_offset + col_ptr_bytes + (off_t)edge_start * (off_t)sizeof(uint32_t);
+		ssize_t row_idx_bytes = (ssize_t)(local_nnz * sizeof(uint32_t));
 
 		if (local_nnz > 0) {
-			if (pread(fd, m->row_idx, row_idx_bytes, row_idx_offset) != row_idx_bytes) {
+			if (pread_full(fd, m->row_idx, (size_t)row_idx_bytes, row_idx_offset) != 0) {
 				if (mpi_rank == 0)
 					print_error(__func__, "failed to read row_idx partition", errno);
 				csc_free_matrix(m);
@@ -672,3 +745,4 @@ csc_free_matrix(CSCBinaryMatrix *m)
 	free(m);
 	m = NULL;
 }
+
