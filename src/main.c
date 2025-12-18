@@ -7,33 +7,29 @@
  * Department of Electrical and Computer Engineering,
  * Aristotle University of Thessaloniki.
  *
- * Loads a sparse binary matrix in CSC format, based on the selected
- * connected components implementation (sequential or parallel),
- * runs a benchmark, and prints the statistics. The implementations
- * are selected through a series of definitions (through compiler flags).
+ * Loads a sparse binary matrix in CSC format, runs a benchmark,
+ * and prints the statistics.
  *
- * Supported implementations:
- * - USE_SEQUENTIAL
- * - USE_OPENMP
- * - USE_PTHREADS
- * - USE_CILK
- *
- * Usage: ./connected_components [-t n_threads] [-n n_trials] ./data_filepath
+ * Usage: ./connected_components_mpi [-n n_trials] ./data_filepath
  */
 
 #include "connected_components.h"
 #include "matrix.h"
 #include "error.h"
 #include "args.h"
-
-#include <stdio.h>
+#include "benchmark.h"
 
 const char *program_name = "connected_components_mpi";
+
+unsigned int omp_threads;
+/* unsigned int mpi_nodes; */
+/* unsigned int mpi_nodes_per_rank; */
 
 int
 main(int argc, char *argv[])
 {
 	CSCBinaryMatrix *matrix;
+	Benchmark *benchmark = NULL;
 	char *filepath;
 	unsigned int n_trials;
 	int ret = 0;
@@ -51,14 +47,17 @@ main(int argc, char *argv[])
 	if (!matrix)
 		return 1;
 
-	ret = connected_components(matrix);
-
-	if (ret > 0) {
-		printf("CC:%d\n", ret);
-		ret = 0;
-	} else {
-		ret = 1;
+	/* Initialize benchmarking structure */
+	benchmark = benchmark_init(filepath, n_trials, matrix);
+	if (!benchmark) {
+		csc_free_matrix(matrix);
+		return 1;
 	}
+
+	/* Actually run the benchmark */
+	ret = benchmark_cc(matrix, benchmark);
+
+	benchmark_print(benchmark);
 
 	/* Cleanup */
 	csc_free_matrix(matrix);

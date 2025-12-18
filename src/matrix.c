@@ -3,12 +3,7 @@
  * @brief CSC (Compressed Sparse Column) binary matrix utilities.
  *
  * This module implements loading, storing, and printing of binary sparse
- * matrices in CSC format. Two input formats are supported:
- *
- * - **MAT files (.mat)** using MATIO, expecting a struct `Problem.A`
- *   containing a MATLAB sparse matrix.
- *
- * - **Matrix Market files (.mtx)** in `coordinate` or `array` format.
+ * matrices in CSC format. It supports only matrix market (.mtx) format.
  *
  * Only binary matrices are represented. Any non-zero numeric values in
  * the input are treated as 1.
@@ -69,8 +64,8 @@ mm_skip_comments(FILE *f)
  * @param filename Path to the .mtx file.
  * @return Newly allocated CSCBinaryMatrix on success, NULL on error.
  */
-static CSCBinaryMatrix*
-csc_load_matrix_mtx(const char *filename)
+CSCBinaryMatrix*
+csc_load_matrix(const char *filename)
 {
 	FILE *f = fopen(filename, "r");
 	if (!f) {
@@ -238,55 +233,6 @@ fail:
 	fclose(f);
 	free(coo_i);
 	free(coo_j);
-	return NULL;
-}
-
-/**
- * @brief Case-insensitive filename extension match.
- *
- * @param filename Path to check.
- * @param ext Expected extension (without dot).
- * @return 1 if matched, 0 otherwise.
- */
-static int
-ext_is(const char *filename, const char *ext)
-{
-	const char *dot = strrchr(filename, '.');
-	if (!dot) return 0;
-	dot++;
-
-	while (*dot && *ext) {
-		if (tolower((unsigned char)*dot) != tolower((unsigned char)*ext))
-			return 0;
-		dot++; ext++;
-	}
-
-	return (*dot == '\0' && *ext == '\0');
-}
-
-/* ------------------------------------------------------------------------- */
-/*                           Public API Functions                             */
-/* ------------------------------------------------------------------------- */
-
-/**
- * @brief Load a sparse binary matrix from a .mat or .mtx file.
- *
- * Automatically dispatches to:
- * - csc_load_matrix_mtx() if the file ends in ".mtx"
- * - csc_load_matrix_mat() if the file ends in ".mat"
- *
- * @param path Path to the matrix file.
- * @return Newly allocated CSCBinaryMatrix, or NULL on failure.
- */
-CSCBinaryMatrix*
-csc_load_matrix(const char *path)
-{
-	if (ext_is(path, "mtx")) {
-		return csc_load_matrix_mtx(path);
-	} else {
-		print_error(__func__, "Unrecognized matrix file extention", 0);
-	}
-	
 	return NULL;
 }
 

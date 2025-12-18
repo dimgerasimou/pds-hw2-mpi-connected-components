@@ -1,17 +1,9 @@
 /**
  * @file cc_openmp.c
- * @brief Optimized OpenMP implementations for computing connected components.
+ * @brief Optimized OpenMP implementation for computing connected components.
  *
- * This module implements two parallel algorithms for finding connected
- * components in an undirected graph using OpenMP:
- *
- * - Label Propagation (variant 0): Iteratively propagates minimum labels
- *   until convergence with persistent threads and relaxed atomics.
- *
- * - Union-Find with Rem's Algorithm (variant 1): Lock-free parallel
- *   union-find using compare-and-swap operations and path compression.
- *
- * Both algorithms return the count of unique connected components.
+ * This module implements a parallel algorithms for finding connected
+ * components in an undirected graph using OpenMP.
  */
 
 #include <stdlib.h>
@@ -112,24 +104,17 @@ union_rem(uint32_t *label, uint32_t a, uint32_t b)
 	}
 }
 
-/* ========================================================================== */
-/*                         UNION-FIND ALGORITHM                               */
-/* ========================================================================== */
-
 /**
- * @brief Computes connected components using parallel union-find.
- *
- * Algorithm phases:
+ * @brief Computes connected components using a parallel union-find algorithm.
+* Algorithm phases:
  * 1. Initialize each node as its own root (parallel)
  * 2. Perform parallel union operations on edges using dynamic scheduling
  * 3. Flatten all paths to roots for accurate counting (parallel)
  * 4. Count roots in parallel using reduction
  *
- * @param matrix Sparse CSC binary matrix representing graph
- * @param n_threads Number of OpenMP threads to use
+ * @param matrix Sparse binary matrix in CSC format
  * @return Number of connected components, or -1 on error
  */
-
 int
 connected_components(const CSCBinaryMatrix *matrix)
 {

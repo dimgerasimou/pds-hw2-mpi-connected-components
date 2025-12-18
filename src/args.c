@@ -3,7 +3,7 @@
  * @brief Command-line argument parsing implementation.
  *
  * Provides functions to parse program arguments that specify
- * the number of threads, number of trials, and input file path.
+ * the number of trials, and input file path.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -60,12 +60,20 @@ usage(void) {
 }
 
 /**
- * @copydoc parseargs()
+ * @brief Parses command-line arguments.
+ *
+ * Supported options:
+ *   -n <trials>    Number of trials (default: 3)
+ *   -h             Show usage and exit
+ *
+ * @param argc Argument count
+ * @param argv Argument vector
+ * @param n_trials Output: number of trials
+ * @param filepath Output: path to matrix file
+ * @return 0 on success, -1 if help requested, 1 on error
  */
 int
-parseargs(int argc, char *argv[],
-          unsigned int *n_trials,
-          char **filepath)
+parseargs(int argc, char *argv[], unsigned int *n_trials, char **filepath)
 {
 	*n_trials = 3;
 	*filepath = NULL;

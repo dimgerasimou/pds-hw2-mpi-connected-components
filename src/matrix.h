@@ -26,9 +26,7 @@ typedef struct {
 	uint32_t *col_ptr;  /**< Column pointers (length ncols + 1) */
 } CSCBinaryMatrix;
 
-/** @brief Load a sparse binary matrix from a .mat or .mtx file.
- *
- * Dispatches automatically based on file extension.
+/** @brief Load a sparse binary matrix from a .mtx file.
  *
  * @param path Path to the matrix file.
  * @return Newly allocated CSCBinaryMatrix, or NULL on failure.
@@ -45,14 +43,5 @@ CSCBinaryMatrix *csc_load_matrix(const char *path);
  * @param m CSC matrix to free.
  */
 void csc_free_matrix(CSCBinaryMatrix *m);
-
-/**
- * @brief Print a sparse binary matrix in coordinate format.
- *
- * @param m Pointer to the CSCBinaryMatrix to print.
- *
- * @note Prints as (row, col) pairs. Indices are 1-based.
- */
-void csc_print_matrix(CSCBinaryMatrix *m);
 
 #endif /* MATRIX_H */
