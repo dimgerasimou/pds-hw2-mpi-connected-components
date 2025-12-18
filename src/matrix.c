@@ -176,7 +176,7 @@ csc_load_bin(const char *filename)
 	}
 
 	m->nrows = nrows_u32;
-	m->ncols = ncols_u32;
+	m->ncols_global = m->ncols = ncols_u32;
 	offset = sizeof(uint32_t) * 2 + sizeof(size_t);
 
 	/* --- Read col_ptr (sequential, relatively small) --------------- */
@@ -643,10 +643,37 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 			return NULL;
 		}
 
+		if (full_col_ptr[0] != 0 || full_col_ptr[ncols] != (uint32_t)nnz_total) {
+			if (mpi_rank == 0)
+				print_error(__func__, "corrupt col_ptr header", 0);
+			free(full_col_ptr);
+			close(fd);
+			return NULL;
+		}
+
+		for (size_t j = 0; j < ncols; j++) {
+			if (full_col_ptr[j] > full_col_ptr[j + 1]) {
+				if (mpi_rank == 0)
+					print_error(__func__, "col_ptr not monotone", 0);
+				free(full_col_ptr);
+				close(fd);
+				return NULL;
+			}
+		}
+
 		/* Determine edge range for this rank's columns */
 		uint32_t edge_start = full_col_ptr[start_col];
 		uint32_t edge_end = full_col_ptr[end_col];
 		size_t local_nnz = (size_t)(edge_end - edge_start);
+
+
+		if (edge_end < edge_start || edge_end > (uint32_t)nnz_total) {
+			if (mpi_rank == 0)
+				print_error(__func__, "bad edge range", 0);
+			free(full_col_ptr);
+			close(fd);
+			return NULL;
+		}
 
 		/* Allocate local matrix */
 		CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
@@ -661,6 +688,7 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		m->nrows = nrows;        /* Keep global row count */
 		m->ncols = local_ncols;  /* Local column count */
 		m->nnz = local_nnz;      /* Local edge count */
+		m->ncols_global = ncols;
 
 		/* Allocate local col_ptr (adjusted to local indexing) */
 		m->col_ptr = malloc((local_ncols + 1) * sizeof(uint32_t));

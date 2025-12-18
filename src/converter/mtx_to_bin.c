@@ -88,6 +88,9 @@ print_progress(size_t current, size_t total, double start_time)
 int
 main(int argc, char **argv)
 {
+	uint32_t *col_ptr = NULL;
+	uint32_t *row_idx = NULL;
+
 	if (argc != 3) {
 		fprintf(stderr, "Usage: %s input.mtx output.bin\n", argv[0]);
 		return 1;
@@ -185,6 +188,11 @@ main(int argc, char **argv)
 				}
 			}
 
+			if (i == 0 || j == 0 || i > nrows || j > ncols) {
+				fprintf(stderr, "Error: index out of bounds i=%zu j=%zu\n", i, j);
+				goto cleanup;
+			}
+
 			if (val != 0.0) {
 				/* Store the edge (i-1, j-1) - MatrixMarket uses 1-based indexing */
 				coo_i[count] = i - 1;
@@ -223,15 +231,20 @@ main(int argc, char **argv)
 		}
 	}
 
+	if (count > UINT32_MAX) {
+		fprintf(stderr, "Error: nnz=%zu exceeds uint32_t capacity. "
+		                "Update file format to 64-bit col_ptr.\n", count);
+		goto cleanup;
+	}
+
 	fclose(fin);
 	fprintf(stderr, "\nRead %zu edges\n", count);
 
 	/* --- Convert COO to CSC -------------------------------------------- */
 	fprintf(stderr, "Converting to CSC format...\n");
 
-	uint32_t *col_ptr = calloc(ncols + 1, sizeof(uint32_t));
-	uint32_t *row_idx = malloc(count * sizeof(uint32_t));
-
+	col_ptr = calloc(ncols + 1, sizeof(uint32_t));
+	row_idx = malloc(count * sizeof(uint32_t));
 	if (!col_ptr || !row_idx) {
 		fprintf(stderr, "Error: malloc failed for CSC\n");
 		goto cleanup;
@@ -269,37 +282,16 @@ main(int argc, char **argv)
 		free(local_counts);
 	}
 
-	#pragma omp parallel
-	{
-		int tid = omp_get_thread_num();
-		int nthreads = omp_get_num_threads();
-		
-		/* Divide columns among threads - each gets a contiguous chunk */
-		size_t chunk_size = (ncols + nthreads - 1) / nthreads;
-		size_t start = tid * chunk_size;
-		size_t end = (start + chunk_size < ncols) ? start + chunk_size : ncols;
+	for (size_t j = 0; j < ncols; j++)
+		col_ptr[j + 1] += col_ptr[j];
 
-		/* Phase 1: Local prefix sum within this thread's chunk */
-		for (size_t j = start; j < end; j++) {
-			col_ptr[j + 1] += col_ptr[j];
-		}
-
-		/* Synchronize: all threads must complete local sums before
-		 * any thread can proceed to apply offsets from previous chunks */
-		#pragma omp barrier
-
-		/* Phase 2: Adjust each chunk by adding offset from previous chunks
-		 * 
-		 * Thread 0's chunk is already correct (no previous chunks).
-		 * Other threads add the final value of the previous chunk (which
-		 * represents the cumulative sum of all earlier chunks).
-		 */
-		if (tid > 0) {
-			uint32_t offset = col_ptr[start];
-			for (size_t j = start + 1; j <= end; j++) {
-				col_ptr[j] += offset;
-			}
-		}
+	/* Sanity: last entry must equal nnz count */
+	if ((size_t)col_ptr[ncols] != count) {
+		fprintf(stderr, "Error: col_ptr[ncols]=%u but nnz(count)=%zu\n",
+		        col_ptr[ncols], count);
+		free(col_ptr);
+		free(row_idx);
+		goto cleanup;
 	}
 
 	/* Fill row indices - PARALLELIZED with atomic operations
@@ -408,6 +400,8 @@ main(int argc, char **argv)
 	return 0;
 
 cleanup:
+	free(col_ptr);
+	free(row_idx);
 	fclose(fin);
 	free(coo_i);
 	free(coo_j);

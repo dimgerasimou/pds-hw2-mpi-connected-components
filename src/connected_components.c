@@ -129,14 +129,16 @@ union_rem(uint32_t *label, uint32_t a, uint32_t b)
  * @return Number of changed labels
  */
 static size_t
-pack_changed_labels(const uint32_t *label, const uint32_t *prev_label,
-                    uint32_t n, uint32_t global_offset, uint32_t *send_buf)
+pack_changed_labels(const uint32_t *label, const uint32_t *prev_label, uint32_t n_local,
+                    uint32_t n_global, uint32_t global_offset, uint32_t *send_buf)
 {
 	size_t count = 0;
 	
 	/* Sequential packing - check ONLY this rank's partition */
-	for (uint32_t i = 0; i < n; i++) {
+	for (uint32_t i = 0; i < n_local; i++) {
 		uint32_t global_id = global_offset + i;  /* Convert to global vertex ID */
+		if (global_id >= n_global)
+			break;
 		if (label[global_id] != prev_label[global_id]) {
 			send_buf[count * 2] = global_id;         /* vertex ID (global) */
 			send_buf[count * 2 + 1] = label[global_id];  /* new label */
@@ -173,17 +175,8 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 		return connected_components(matrix);
 	}
 	
-	/* For distributed case:
-	 * - Each rank owns a partition of COLUMNS (vertices)
-	 * - matrix->ncols = number of local columns (vertices) this rank owns
-	 * - matrix->nrows = total number of rows (may equal total vertices for square matrices)
-	 * 
-	 * CRITICAL: We must calculate global_offset the SAME WAY as the loader!
-	 * The loader partitions based on the ORIGINAL ncols from the file.
-	 * After loading, matrix->nrows tells us the original total.
-	 */
-	const uint32_t n = (uint32_t)matrix->nrows;  /* total vertices (global) */
-	const uint32_t local_n = (uint32_t)matrix->ncols;  /* local vertices owned by this rank */
+	const uint32_t n = (uint32_t)matrix->ncols_global;
+	const uint32_t local_n = (uint32_t)matrix->ncols;
 	
 	/* Calculate global_offset using SAME logic as csc_load_matrix_distributed */
 	/* It partitions based on total columns (which = nrows for square adjacency matrix) */
@@ -238,7 +231,7 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 				
 				for (uint32_t j = start; j < end; j++) {
 					uint32_t row = matrix->row_idx[j];
-					if (row < n)
+					if (row < n && global_col < n)
 						union_rem(label, row, global_col);
 				}
 			}
@@ -250,7 +243,7 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 			find_compress(label, i);
 		
 		/* Phase 3: Pack changed labels only */
-		size_t num_changed = pack_changed_labels(label, prev_label, local_n,
+		size_t num_changed = pack_changed_labels(label, prev_label, local_n, n,
 		                                          global_offset, send_buf);
 		
 		/* Phase 4: Exchange changed labels via MPI_Allgatherv */
@@ -362,6 +355,9 @@ connected_components(const CSCBinaryMatrix *matrix)
 	/* Single-process version - original algorithm */
 	if (!matrix || matrix->nrows == 0)
 		return 0;
+
+	if (matrix->nrows != matrix->ncols)
+		return -1;
 	
 	const uint32_t n = (uint32_t)matrix->nrows;
 	uint32_t *label = malloc(n * sizeof(uint32_t));
@@ -383,7 +379,7 @@ connected_components(const CSCBinaryMatrix *matrix)
 			
 			for (uint32_t j = start; j < end; j++) {
 				uint32_t row = matrix->row_idx[j];
-				if (row < n)
+				if (row < n && col < n)
 					union_rem(label, row, col);
 			}
 		}
