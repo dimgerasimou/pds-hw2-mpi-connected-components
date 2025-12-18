@@ -6,14 +6,16 @@
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=2G
+#SBATCH --mem-bind=local
 
 module load gcc openmpi
-make
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=close
 export OMP_PLACES=cores
 export OMP_DYNAMIC=false
+export OMP_STACKSIZE=256M
 
 export RETRIES=10
 export FILEPATH=$SCRATCH/data/bin/com-Friendster.bin
