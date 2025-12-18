@@ -42,6 +42,11 @@ $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
 	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) $<"
 	@$(CC) $(CFLAGS) -c $< -o $@
 
+converter: | $(BIN_DIR)
+	@$(ECHO) "$(COLOR_BLUE)Compiling:$(COLOR_RESET) mtx_to_bin"
+	@gcc $(CFLAGS) $(LDFLAGS) $(SRC_DIR)/converter/mtx_to_bin.c -o $(BIN_DIR)/mtx_to_bin
+
+
 .PHONY: clean
 clean:
 	@$(ECHO) "$(COLOR_YELLOW)Cleaning...$(COLOR_RESET)"

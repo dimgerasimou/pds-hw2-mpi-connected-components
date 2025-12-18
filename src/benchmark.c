@@ -237,13 +237,6 @@ benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b)
 {
 	long result;
 
-	result = connected_components(m); /* warm-up run */
-
-	if (result < 0)
-		return 1;
-
-	b->result.connected_components = result;
-
 	for (unsigned int i = 0; i < b->benchmark_info.trials; i++) {
 		double start_time = now_sec();
 		result = connected_components(m);
@@ -251,6 +244,9 @@ benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b)
 
 		if (result < 0)
 			return 1;
+		
+		if (i == 0) 
+			b->result.connected_components = result;
 
 		if (result != b->result.connected_components) {
 			printf("Components between retries don't match\n");
