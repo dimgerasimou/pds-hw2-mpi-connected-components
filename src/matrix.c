@@ -11,18 +11,14 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
-#define _DEFAULT_SOURCE
 
 #include <ctype.h>
 #include <errno.h>
-#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <sys/stat.h>
-#include <sys/mman.h>
 #include <omp.h>
 
 #include "matrix.h"
@@ -76,7 +72,7 @@ get_file_extension(const char *filename)
 }
 
 static CSCBinaryMatrix*
-csc_load_binary_parallel(const char *filename)
+csc_load_bin(const char *filename)
 {
 	/* --- Open file with O_DIRECT hint for better performance ------- */
 	int fd = open(filename, O_RDONLY);
@@ -175,104 +171,6 @@ csc_load_binary_parallel(const char *filename)
 		csc_free_matrix(m);
 		return NULL;
 	}
-
-	return m;
-}
-
-/**
- * @brief Load CSC matrix using memory-mapped I/O with parallel access.
- *
- * This is often the fastest method as the OS handles paging automatically.
- * Multiple threads can read from the mapped region simultaneously.
- *
- * @param filename Path to the .bin file.
- * @return Newly allocated CSCBinaryMatrix on success, NULL on error.
- */
-static CSCBinaryMatrix*
-csc_load_binary_mmap(const char *filename)
-{
-	/* --- Open and get file size ------------------------------------ */
-	int fd = open(filename, O_RDONLY);
-	if (fd < 0) {
-		print_error(__func__, "failed to open .bin file", errno);
-		return NULL;
-	}
-
-	struct stat sb;
-	if (fstat(fd, &sb) < 0) {
-		print_error(__func__, "fstat failed", errno);
-		close(fd);
-		return NULL;
-	}
-
-	/* --- Memory-map the entire file -------------------------------- */
-	void *mapped = mmap(NULL, sb.st_size, PROT_READ,
-	                    MAP_PRIVATE | MAP_POPULATE, fd, 0);
-	
-	if (mapped == MAP_FAILED) {
-		print_error(__func__, "mmap failed", errno);
-		close(fd);
-		return NULL;
-	}
-
-	/* Advise kernel we'll read sequentially, then randomly */
-	madvise(mapped, sb.st_size, MADV_SEQUENTIAL);
-	madvise(mapped, sb.st_size, MADV_WILLNEED);
-
-	/* --- Parse header ---------------------------------------------- */
-	uint8_t *ptr = (uint8_t *)mapped;
-	uint32_t nrows_u32, ncols_u32;
-	size_t nnz;
-
-	memcpy(&nrows_u32, ptr, sizeof(uint32_t));
-	ptr += sizeof(uint32_t);
-	
-	memcpy(&ncols_u32, ptr, sizeof(uint32_t));
-	ptr += sizeof(uint32_t);
-	
-	memcpy(&nnz, ptr, sizeof(size_t));
-	ptr += sizeof(size_t);
-
-	/* --- Allocate CSC structure ------------------------------------ */
-	CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
-	if (!m) {
-		print_error(__func__, "malloc failed", errno);
-		munmap(mapped, sb.st_size);
-		close(fd);
-		return NULL;
-	}
-
-	m->nrows = nrows_u32;
-	m->ncols = ncols_u32;
-	m->nnz = nnz;
-
-	m->col_ptr = malloc((m->ncols + 1) * sizeof(uint32_t));
-	m->row_idx = malloc(m->nnz * sizeof(uint32_t));
-
-	if (!m->col_ptr || !m->row_idx) {
-		print_error(__func__, "malloc failed for arrays", errno);
-		csc_free_matrix(m);
-		munmap(mapped, sb.st_size);
-		close(fd);
-		return NULL;
-	}
-
-	/* --- Copy col_ptr (sequential) --------------------------------- */
-	size_t col_ptr_bytes = (m->ncols + 1) * sizeof(uint32_t);
-	memcpy(m->col_ptr, ptr, col_ptr_bytes);
-	ptr += col_ptr_bytes;
-
-	/* --- Copy row_idx in parallel ---------------------------------- */
-	uint32_t *src_row_idx = (uint32_t *)ptr;
-	
-	#pragma omp parallel for schedule(static)
-	for (size_t i = 0; i < m->nnz; i++) {
-		m->row_idx[i] = src_row_idx[i];
-	}
-
-	/* --- Cleanup --------------------------------------------------- */
-	munmap(mapped, sb.st_size);
-	close(fd);
 
 	return m;
 }
@@ -577,18 +475,10 @@ csc_load_matrix(const char *filename)
 	}
 
 	if (strcmp(ext, "bin") == 0) {
-		/* Try mmap first (usually fastest) */
-		CSCBinaryMatrix *m = csc_load_binary_mmap(filename);
-		if (!m) {
-			/* Fall back to parallel pread */
-			m = csc_load_binary_parallel(filename);
-		}
-		return m;
-	}
-	else if (strcmp(ext, "mtx") == 0) {
+		return csc_load_bin(filename);
+	} else if (strcmp(ext, "mtx") == 0) {
 		return csc_load_mtx(filename);
-	}
-	else {
+	} else {
 		print_error(__func__, "unsupported file extension", 0);
 		return NULL;
 	}
@@ -606,16 +496,10 @@ csc_free_matrix(CSCBinaryMatrix *m)
 {
 	if (!m)
 		return;
-
-	if (m->row_idx) {
+	if (m->row_idx)
 		free(m->row_idx);
-		m->row_idx = NULL;
-	}
-
-	if (m->col_ptr) {
+	if (m->col_ptr)
 		free(m->col_ptr);
-		m->col_ptr = NULL;
-	}
 
 	free(m);
 	m = NULL;
