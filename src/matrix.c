@@ -631,11 +631,6 @@ csc_load_matrix_distributed(const char *filename, int mpi_rank, int mpi_size)
 		}
 
 		close(fd);
-		
-		/* Debug output from all ranks */
-		fprintf(stderr, "[Rank %d] Loaded partition: columns [%zu, %zu) = %zu cols, nnz=%zu\n",
-		        mpi_rank, start_col, end_col, local_ncols, local_nnz);
-		
 		return m;
 	}
 	/* For .mtx format: rank 0 loads, others receive via MPI */
