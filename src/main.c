@@ -21,10 +21,6 @@
 
 const char *program_name = "connected_components_mpi";
 
-unsigned int omp_threads;
-/* unsigned int mpi_nodes; */
-/* unsigned int mpi_nodes_per_rank; */
-
 int
 main(int argc, char *argv[])
 {

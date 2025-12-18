@@ -23,10 +23,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-
-#ifdef _OPENMP
 #include <omp.h>
-#endif
 
 #include "matrix.h"
 #include "error.h"
@@ -281,94 +278,6 @@ csc_load_binary_mmap(const char *filename)
 }
 
 /**
- * @brief Load a CSC matrix from a binary (.bin) file with chunked I/O.
- *
- * Binary format:
- *   - uint32_t nrows
- *   - uint32_t ncols
- *   - size_t   nnz
- *   - uint32_t col_ptr[ncols + 1]
- *   - uint32_t row_idx[nnz]
- *
- * @param filename Path to the .bin file.
- * @return Newly allocated CSCBinaryMatrix on success, NULL on error.
- */
-static CSCBinaryMatrix*
-csc_load_binary(const char *filename)
-{
-	FILE *f = fopen(filename, "rb");
-	if (!f) {
-		print_error(__func__, "failed to open .bin file", errno);
-		return NULL;
-	}
-
-	CSCBinaryMatrix *m = malloc(sizeof(CSCBinaryMatrix));
-	if (!m) {
-		print_error(__func__, "malloc failed", errno);
-		fclose(f);
-		return NULL;
-	}
-
-	/* read header */
-	uint32_t nrows_u32, ncols_u32;
-	if (fread(&nrows_u32, sizeof(uint32_t), 1, f) != 1 ||
-	    fread(&ncols_u32, sizeof(uint32_t), 1, f) != 1 ||
-	    fread(&m->nnz, sizeof(size_t), 1, f) != 1)
-	{
-		print_error(__func__, "failed to read header", errno);
-		free(m);
-		fclose(f);
-		return NULL;
-	}
-
-	m->nrows = nrows_u32;
-	m->ncols = ncols_u32;
-
-	/* allocate arrays */
-	m->col_ptr = malloc((m->ncols + 1) * sizeof(uint32_t));
-	m->row_idx = malloc(m->nnz * sizeof(uint32_t));
-
-	if (!m->col_ptr || !m->row_idx) {
-		print_error(__func__, "malloc failed", errno);
-		csc_free_matrix(m);
-		fclose(f);
-		return NULL;
-	}
-
-	/* read col_ptr */
-	if (fread(m->col_ptr, sizeof(uint32_t), m->ncols + 1, f) != m->ncols + 1) {
-		print_error(__func__, "failed to read col_ptr", errno);
-		csc_free_matrix(m);
-		fclose(f);
-		return NULL;
-	}
-
-	/* read row_idx in chunks for large matrices */
-	size_t chunk_size = 100000000; /* 100M entries */
-	size_t read_so_far = 0;
-
-	while (read_so_far < m->nnz) {
-		size_t to_read = (m->nnz - read_so_far < chunk_size) ?
-		                 (m->nnz - read_so_far) : chunk_size;
-
-		size_t actual = fread(&m->row_idx[read_so_far],
-		                      sizeof(uint32_t), to_read, f);
-
-		if (actual != to_read) {
-			print_error(__func__, "failed to read row_idx chunk", errno);
-			csc_free_matrix(m);
-			fclose(f);
-			return NULL;
-		}
-
-		read_so_far += actual;
-	}
-
-	fclose(f);
-	return m;
-}
-
-/**
  * @brief Load a CSC matrix from a Matrix Market (.mtx) file with parallel processing.
  *
  * Supports the following formats:
@@ -495,7 +404,6 @@ csc_load_mtx(const char *filename)
 		goto fail_raw;
 	}
 
-#ifdef _OPENMP
 	int nthreads = omp_get_max_threads();
 	size_t *thread_counts = calloc(nthreads, sizeof(size_t));
 	size_t *thread_offsets = calloc(nthreads, sizeof(size_t));
@@ -557,24 +465,6 @@ csc_load_mtx(const char *filename)
 	size_t count = thread_offsets[nthreads - 1] + thread_counts[nthreads - 1];
 	free(thread_counts);
 	free(thread_offsets);
-#else
-	/* serial fallback */
-	size_t count = 0;
-	for (size_t k = 0; k < nnz; k++) {
-		double val = is_pattern ? 1.0 : raw_v[k];
-		if (val != 0.0) {
-			coo_i[count] = raw_i[k];
-			coo_j[count] = raw_j[k];
-			count++;
-
-			if (symmetric && raw_i[k] != raw_j[k]) {
-				coo_i[count] = raw_j[k];
-				coo_j[count] = raw_i[k];
-				count++;
-			}
-		}
-	}
-#endif
 
 	free(raw_i); free(raw_j); free(raw_v);
 
@@ -601,7 +491,6 @@ csc_load_mtx(const char *filename)
 	/* parallel: count entries per column */
 	memset(m->col_ptr, 0, (ncols + 1) * sizeof(uint32_t));
 
-#ifdef _OPENMP
 	#pragma omp parallel
 	{
 		/* thread-local column counts */
@@ -623,11 +512,6 @@ csc_load_mtx(const char *filename)
 			free(local_col_count);
 		}
 	}
-#else
-	/* serial fallback */
-	for (size_t k = 0; k < count; k++)
-		m->col_ptr[coo_j[k] + 1]++;
-#endif
 
 	/* prefix sum */
 	for (size_t j = 0; j < ncols; j++)
