@@ -2,14 +2,18 @@
  * @file mtx_to_bin.c
  * @brief Convert Matrix Market (.mtx) files to fast binary CSC format.
  *
- * Usage: ./mtx2bin input.mtx output.bin
+ * Usage: ./mtx_to_bin input.mtx output.bin
  *
+ * Parallelized with OpenMP for faster conversion of large graphs.
+ * 
  * Binary format:
- *   - uint32_t nrows
- *   - uint32_t ncols
- *   - size_t   nnz
- *   - uint32_t col_ptr[ncols + 1]
- *   - uint32_t row_idx[nnz]
+ *   Header:
+ *     - uint32_t nrows       : Number of rows
+ *     - uint32_t ncols       : Number of columns  
+ *     - size_t   nnz         : Number of non-zeros
+ *   CSC data:
+ *     - uint32_t col_ptr[ncols + 1] : Column pointers (offsets)
+ *     - uint32_t row_idx[nnz]       : Row indices
  */
 #include <ctype.h>
 #include <errno.h>
@@ -18,11 +22,18 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <omp.h>
 
 /* ------------------------------------------------------------------------- */
 /*                            Helper Functions                               */
 /* ------------------------------------------------------------------------- */
 
+/**
+ * @brief Skip comment lines and whitespace in Matrix Market file.
+ *
+ * @param f File pointer to Matrix Market file
+ * @return 0 on success
+ */
 static int
 mm_skip_comments(FILE *f)
 {
@@ -43,12 +54,22 @@ mm_skip_comments(FILE *f)
 	}
 }
 
+/**
+ * @brief Print conversion progress with rate and ETA estimation.
+ *
+ * Displays progress every 100M edges or at completion. Calculates
+ * processing rate and estimates time remaining based on elapsed time.
+ *
+ * @param current Number of edges processed so far
+ * @param total Total number of edges to process
+ * @param start_time Start time from omp_get_wtime()
+ */
 static void
-print_progress(size_t current, size_t total, time_t start_time)
+print_progress(size_t current, size_t total, double start_time)
 {
 	if (current % 100000000 == 0 || current == total) {
-		time_t now = time(NULL);
-		double elapsed = difftime(now, start_time);
+		double now = omp_get_wtime();
+		double elapsed = now - start_time;
 		double rate = current / (elapsed + 0.001);
 		double eta = (total - current) / (rate + 0.001);
 
@@ -74,7 +95,9 @@ main(int argc, char **argv)
 
 	const char *infile = argv[1];
 	const char *outfile = argv[2];
-	time_t start_time = time(NULL);
+	
+	/* Use high-resolution OpenMP timer for accurate performance measurement */
+	double start_time = omp_get_wtime();
 
 	/* --- Open input ---------------------------------------------------- */
 	FILE *fin = fopen(infile, "r");
@@ -120,7 +143,15 @@ main(int argc, char **argv)
 		nnz = nrows * ncols;
 	}
 
+	int num_threads;
+	#pragma omp parallel
+	{
+		#pragma omp single
+		num_threads = omp_get_num_threads();
+	}
+
 	fprintf(stderr, "Matrix: %zu x %zu, NNZ: %zu\n", nrows, ncols, nnz);
+	fprintf(stderr, "Using %d OpenMP threads\n", num_threads);
 
 	/* --- Allocate COO arrays ------------------------------------------- */
 	size_t max_nnz = nnz * (symmetric ? 2 : 1);
@@ -155,10 +186,13 @@ main(int argc, char **argv)
 			}
 
 			if (val != 0.0) {
+				/* Store the edge (i-1, j-1) - MatrixMarket uses 1-based indexing */
 				coo_i[count] = i - 1;
 				coo_j[count] = j - 1;
 				count++;
 
+				/* For symmetric matrices, also store the transpose edge (j-1, i-1)
+				 * unless it's a diagonal entry (i == j), which would be redundant */
 				if (symmetric && i != j) {
 					coo_i[count] = j - 1;
 					coo_j[count] = i - 1;
@@ -203,15 +237,77 @@ main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	/* count entries per column */
-	for (size_t k = 0; k < count; k++)
-		col_ptr[coo_j[k] + 1]++;
+	/* Count entries per column
+	 *
+	 * Strategy: Each thread maintains a thread-local histogram to avoid
+	 * contention. After counting, thread-local histograms are reduced
+	 * into the global col_ptr array using a critical section.
+	 */
+	#pragma omp parallel
+	{
+		/* Allocate thread-local histogram for this thread's counts */
+		uint32_t *local_counts = calloc(ncols + 1, sizeof(uint32_t));
+		if (!local_counts) {
+			fprintf(stderr, "Error: thread-local malloc failed\n");
+			exit(1);
+		}
 
-	/* prefix sum */
-	for (size_t j = 0; j < ncols; j++)
-		col_ptr[j + 1] += col_ptr[j];
+		/* Each thread processes its share of edges independently */
+		#pragma omp for schedule(static)
+		for (size_t k = 0; k < count; k++) {
+			local_counts[coo_j[k] + 1]++;
+		}
 
-	/* fill row indices */
+		/* Reduce thread-local counts into global col_ptr */
+		#pragma omp critical
+		{
+			for (size_t j = 0; j <= ncols; j++) {
+				col_ptr[j] += local_counts[j];
+			}
+		}
+
+		free(local_counts);
+	}
+
+	#pragma omp parallel
+	{
+		int tid = omp_get_thread_num();
+		int nthreads = omp_get_num_threads();
+		
+		/* Divide columns among threads - each gets a contiguous chunk */
+		size_t chunk_size = (ncols + nthreads - 1) / nthreads;
+		size_t start = tid * chunk_size;
+		size_t end = (start + chunk_size < ncols) ? start + chunk_size : ncols;
+
+		/* Phase 1: Local prefix sum within this thread's chunk */
+		for (size_t j = start; j < end; j++) {
+			col_ptr[j + 1] += col_ptr[j];
+		}
+
+		/* Synchronize: all threads must complete local sums before
+		 * any thread can proceed to apply offsets from previous chunks */
+		#pragma omp barrier
+
+		/* Phase 2: Adjust each chunk by adding offset from previous chunks
+		 * 
+		 * Thread 0's chunk is already correct (no previous chunks).
+		 * Other threads add the final value of the previous chunk (which
+		 * represents the cumulative sum of all earlier chunks).
+		 */
+		if (tid > 0) {
+			uint32_t offset = col_ptr[start];
+			for (size_t j = start + 1; j <= end; j++) {
+				col_ptr[j] += offset;
+			}
+		}
+	}
+
+	/* Fill row indices - PARALLELIZED with atomic operations
+	 *
+	 * Strategy: Process edges in parallel, using atomic operations to safely
+	 * coordinate writes to the shared col_fill array. Each thread increments
+	 * col_fill[j] atomically to claim its position in the output for column j.
+	 */
 	uint32_t *col_fill = calloc(ncols, sizeof(uint32_t));
 	if (!col_fill) {
 		fprintf(stderr, "Error: malloc failed\n");
@@ -220,11 +316,22 @@ main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	for (size_t k = 0; k < count; k++) {
-		uint32_t j = coo_j[k];
-		uint32_t dest = col_ptr[j] + col_fill[j];
-		row_idx[dest] = coo_i[k];
-		col_fill[j]++;
+	#pragma omp parallel
+	{
+		/* Each thread processes its portion of edges */
+		#pragma omp for schedule(static)
+		for (size_t k = 0; k < count; k++) {
+			uint32_t j = coo_j[k];
+			
+			/* Atomically claim a position in the output array for column j */
+			uint32_t dest;
+			#pragma omp atomic capture
+			dest = col_fill[j]++;
+			
+			/* Calculate final position: column start + offset within column */
+			dest += col_ptr[j];
+			row_idx[dest] = coo_i[k];
+		}
 	}
 
 	free(col_fill);
@@ -266,7 +373,7 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	/* write row_idx in chunks for better performance */
+	/* Write row_idx in chunks for better performance */
 	size_t chunk_size = 100000000; /* 100M entries at a time */
 	size_t written = 0;
 	while (written < count) {
@@ -291,11 +398,11 @@ main(int argc, char **argv)
 	free(col_ptr);
 	free(row_idx);
 
-	time_t end_time = time(NULL);
-	double total_time = difftime(end_time, start_time);
+	double end_time = omp_get_wtime();
+	double total_time = end_time - start_time;
 
 	fprintf(stderr, "\n\nConversion complete!\n");
-	fprintf(stderr, "Total time: %.0f seconds\n", total_time);
+	fprintf(stderr, "Total time: %.2f seconds\n", total_time);
 	fprintf(stderr, "Output file: %s\n", outfile);
 
 	return 0;
