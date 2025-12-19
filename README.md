@@ -1,187 +1,103 @@
-<h1 align="center">Connected Components: Distributed-Memory Implementation</h1>
-<h3 align="center">Parallel and Distributed Systems</h3>
+# Connected Components — Distributed-Memory (MPI) Implementation
 
 <p align="center">
-  <em>Department of Electrical and Computer Engineering</em><br>
-  <em>Aristotle University of Thessaloniki</em><br>
-  <strong>Homework #2</strong>
+  <img src="https://img.shields.io/badge/parallelism-MPI%20%2B%20OpenMP-blueviolet" alt="MPI + OpenMP">
 </p>
 
-<p align="center">
-  <img src="https://img.shields.io/badge/language-C-blue.svg" alt="Language">
-  <img src="https://img.shields.io/badge/parallelism-MPI%20%2B%20OpenMP-success" alt="MPI + OpenMP">
-  <img src="https://img.shields.io/badge/platform-Linux%20%7C%20HPC-lightgrey" alt="Platform">
-</p>
+Assignment #2 for the Parallel and Distributed Systems course.
+
+A **distributed-memory connected components** implementation for massive sparse graphs, designed for modern **HPC systems** using **MPI + OpenMP**.
+
+The focus is on scalability beyond a single node, efficient memory usage, and realistic benchmarking on large real-world graphs.
 
 ## Overview
 
-This project implements a **high-performance distributed-memory connected components algorithm** for **massive sparse graphs**, targeting modern HPC systems.
+This project implements a high-performance connected components algorithm for distributed-memory systems.
 
-The focus is on **scalability beyond a single node**, combining:
-- **MPI** for inter-node communication and data distribution
-- **OpenMP** for intra-node shared-memory parallelism
-
-The implementation is designed to process graphs with **billions of edges**, using a **custom binary CSC format** to minimize I/O overhead and memory footprint.
+Key goals:
+- Scale to graphs with billions of edges
+- Minimize memory usage per MPI rank
+- Combine MPI-based distribution with OpenMP intra-node parallelism
 
 ## Features
 
-- **Distributed-memory connected components**
-  - Graph partitioned by column blocks across MPI ranks
-  - Each rank loads *only its local partition*
-- **Hybrid parallelism**
-  - MPI between nodes
-  - OpenMP within each node
-- **Binary CSC graph format**
-  - Fast loading
-  - Compact storage
-  - Avoids Matrix Market parsing overhead at scale
-- **Scales to billions of edges**
-  - Tested on real-world graphs (Friendster, MAWI)
-- **Automated benchmarking**
-  - Multiple trials
-  - Mean, median, std dev, min/max
-  - Throughput in edges/sec
-- **NUMA- and cluster-aware**
-  - Explicit control over ranks, threads, and memory distribution
+- Hybrid **MPI + OpenMP** parallelism
+- Distributed-memory connected components algorithm
+- Column-block graph partitioning across MPI ranks
+- Custom binary **CSC graph format** for fast I/O
+- Automated benchmarking and JSON output
+- Designed for SLURM-managed HPC clusters
 
 ## Algorithm
 
-The project implements a **parallel label propagation–style connected components algorithm** adapted for distributed memory:
+The implementation follows a **label-propagation-style** connected components algorithm adapted for distributed memory:
 
 1. Each MPI rank owns a contiguous block of columns (CSC format)
 2. Labels are initialized locally
 3. Iterative propagation:
-   - Local relaxation with OpenMP
+   - Local relaxation using OpenMP
    - Boundary updates exchanged via MPI
-4. Convergence detection via global reductions
+4. Convergence detected using collective reductions
 5. Final component count computed collectively
 
-This approach minimizes memory usage per rank and limits communication to boundary data.
-
-## Dependencies
-
-
-### Required
-
-| Dependency | Purpose |
-|----------|---------|
-| `MPI` (OpenMPI / MPICH / system MPI) | Distributed execution |
-| `OpenMP` | Intra-node parallelism |
-| `gcc` or `clang` | Compilation |
-| `make` | Build system |
-
-### Environment
-
-The code is intended to run on:
-- Linux-based HPC clusters
-- SLURM-managed systems
+This approach limits communication to boundary data and minimizes per-rank memory usage.
 
 ## Build
 
-Compile main target:
+### Requirements
+- MPI implementation (OpenMPI / MPICH / system MPI)
+- OpenMP
+- C compiler (`gcc` or `clang`)
+- `make`
 
+### Compile
 ```bash
 make
 ```
 
-This produces: `bin/connected_components_mpi`
-
-Clean build:
-
-```bash
-make clean
-make
+Produces:
 ```
-
-Use `make converter` to compile the matrix market to binary converted needed.
-
+bin/connected_components_mpi
+```
 
 ## Input Format
 
-### Binary CSC Format
+Graphs are stored in a custom binary **Compressed Sparse Column (CSC)** format optimized for fast loading and low memory overhead.
 
-Graphs are stored in a custom binary **Compressed Sparse Column CSC** format:
+Matrix Market files must be converted before execution.
 
-```c
-uint32_t nrows
-uint32_t ncols
-size_t   nnz
-uint32_t col_ptr[ncols + 1]
-uint32_t row_idx[nnz]
-```
-
-### Convert from Matrix Market
-
-```bash
-./bin/mtx_to_bin input.mtx output.bin
-```
-
-This conversion step is **mandatory** before execution.
-
-## Usage
-
-First you need to convert the matrix market array to a binary file for the program to read. This can be done with:
 ```bash
 make converter
 ./bin/mtx_to_bin input.mtx output.bin
 ```
 
-Then edit `run_slurm.sh` to match your configuration and run it with:
+## Usage
+
+Execution is intended for HPC environments using SLURM.
+
 ```bash
 sbatch run_slurm.sh
 ```
 
-## Output
-
-For each run, the program reports:
-- Number of connected components
-- Execution time statistics
-- Throughput in edges per second
-
-Results are printed in a machine-readable .json format suitable for later analysis.
+The executable is launched via `srun` inside the SLURM job script.  
+The SLURM script controls:
+- Number of nodes
+- MPI ranks per node
+- OpenMP threads per rank
 
 ## Performance Results
-**Example: Friendster Social Network**
- - **Nodes**: 65,608,366
- - **Edges**: 3,612,134,270
- - **System**: AMD EPYC 7662
- - **Memory**: ~256 GB per node
 
-| MPI Ranks	| Threads / Rank |	Total Cores	| Mean Time (s)	| Throughput (M edges/s) |
-|----------:|---------------:|-------------:|--------------:|-----------------------:|
-| 1         | 16             | 16           | 11.10         | 325                    |
-| 1         | 64             | 64           | 4.84          | 736                    |
-| 2         | 64             | 128          | 29.35         | 123                    |
-| 4         | 64             | 256          | 16.44         | 220                    |
-| 16        | 64             | 1024         | 6.40          | 565                    |
-
-Results show:
-- Communication overhead dominating at higher rank counts.
-- Stable convergence behavior across configurations.
+Detailed benchmark tables and scaling results are available in [docs/performance.md](docs/performance.md).
 
 ## Notes on Scalability
-- The implementation is **memory-bandwidth bound** on a single node.
-- At scale, **MPI communication and synchronization dominate**.
 
-- Best performance achieved with:
-  - Few ranks per node
+- Single-node performance is primarily memory-bandwidth bound
+- At scale, MPI communication and synchronization dominate
+- Best results achieved with:
+  - Few MPI ranks per node
   - Many OpenMP threads per rank
-
-## Troubleshooting
-
-**Out of Memory**
-- Ensure the binary format is used.
-- Reduce ranks per node.
-- Increase `OMP_STACKSIZE`.
-
-**Poor Scaling**
-- Avoid oversubscribing cores.
-- Prefer `--distribution=block:block`.
-- Disable OpenMP dynamic teams:
-```bash
-export OMP_DYNAMIC=false
-```
+- Optimal configurations are hardware- and workload-dependent
 
 ---
 
-<p align="center"> <sub>December 2025 • Aristotle University of Thessaloniki</sub> </p>
+<p align="center"><sub>December 2025 • Aristotle University of Thessaloniki</sub></p>
