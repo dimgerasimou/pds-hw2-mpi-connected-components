@@ -28,6 +28,6 @@ export OMP_STACKSIZE=256M
 export RETRIES=10
 export FILEPATH="${SCRATCH}/data/bin/com-Friendster.bin"
 
-srun --cpu-bind=cores ./bin/connected_components_mpi \
+srun --mpi=pmix --cpu-bind=cores ./bin/connected_components_mpi \
   -n "${RETRIES}" "${FILEPATH}"
 

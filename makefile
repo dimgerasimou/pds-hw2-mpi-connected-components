@@ -3,7 +3,8 @@ PROJECT := connected_components_mpi
 CC := mpicc
 GCC := gcc
 
-CFLAGS  := -Wall -Wextra -Wpedantic -std=c11 -O3 -Isrc -fopenmp
+CFLAGS  := -Wall -Wextra -Wpedantic -std=c11 -O3 -DNDEBUG \
+           -Isrc -fopenmp -march=znver2 -mtune=znver2
 LDFLAGS := -fopenmp
 LDLIBS  := -lm
 
