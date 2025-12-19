@@ -24,114 +24,6 @@
 
 #include "connected_components.h"
 
-/* ========================================================================== */
-/*                    ORIGINAL OPENMP-ONLY VERSION (UNCHANGED)                */
-/* ========================================================================== */
-
-static inline uint32_t
-find_compress(uint32_t *label, uint32_t x)
-{
-	uint32_t root = x;
-
-	while (label[root] != root)
-		root = label[root];
-
-	while (x != root) {
-		uint32_t next = label[x];
-		label[x] = root;
-		x = next;
-	}
-
-	return root;
-}
-
-static inline void
-union_rem(uint32_t *label, uint32_t a, uint32_t b)
-{
-	const int MAX_RETRIES = 10;
-
-	for (int retry = 0; retry < MAX_RETRIES; retry++) {
-		a = find_compress(label, a);
-		b = find_compress(label, b);
-
-		if (a == b)
-			return;
-
-		if (a > b) {
-			uint32_t temp = a;
-			a = b;
-			b = temp;
-		}
-
-		uint32_t expected = b;
-		if (__atomic_compare_exchange_n(&label[b], &expected, a,
-		                                0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
-			return;
-		}
-
-		b = expected;
-	}
-
-	a = find_compress(label, a);
-	b = find_compress(label, b);
-	if (a != b) {
-		if (a > b) {
-			uint32_t temp = a;
-			a = b;
-			b = temp;
-		}
-		__atomic_store_n(&label[b], a, __ATOMIC_RELEASE);
-	}
-}
-
-static int
-connected_components_omp(const CSCBinaryMatrix *matrix)
-{
-	if (!matrix || matrix->nrows == 0)
-		return 0;
-
-	const uint32_t n = (uint32_t)matrix->nrows;
-	uint32_t *label = malloc((size_t)n * sizeof(uint32_t));
-	if (!label)
-		return -1;
-
-	#pragma omp parallel for schedule(static)
-	for (uint32_t i = 0; i < n; i++)
-		label[i] = i;
-
-	#pragma omp parallel
-	{
-		#pragma omp for schedule(dynamic, 128) nowait
-		for (uint32_t col = 0; col < (uint32_t)matrix->ncols; col++) {
-			uint32_t start = matrix->col_ptr[col];
-			uint32_t end = matrix->col_ptr[col + 1];
-
-			for (uint32_t j = start; j < end; j++) {
-				uint32_t row = matrix->row_idx[j];
-				if (row < n)
-					union_rem(label, row, col);
-			}
-		}
-	}
-
-	#pragma omp parallel for schedule(static, 2048)
-	for (uint32_t i = 0; i < n; i++)
-		find_compress(label, i);
-
-	uint32_t count = 0;
-	#pragma omp parallel for reduction(+:count) schedule(static, 2048)
-	for (uint32_t i = 0; i < n; i++)
-		if (label[i] == i)
-			count++;
-
-	free(label);
-	return (int)count;
-}
-
-/* ========================================================================== */
-/*                                MPI VERSION                                 */
-/* ========================================================================== */
-
 static inline uint32_t
 min_u32(uint32_t a, uint32_t b)
 {
@@ -150,9 +42,12 @@ compute_partition_u32(uint32_t n, int mpi_size, int mpi_rank,
 	*local_n = base + (mpi_rank < (int)rem ? 1u : 0u);
 }
 
-static int
-connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_size)
+int
+connected_components(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_size)
 {
+	if (!matrix || matrix->nrows == 0)
+		return 0;
+	
 	const uint32_t n = (uint32_t)matrix->ncols_global;
 
 	uint32_t global_offset, local_n;
@@ -271,21 +166,5 @@ connected_components_mpi(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_si
 	free(label_global);
 
 	return (int)global_count;
-}
-
-/* ========================================================================== */
-/*                                PUBLIC API                                  */
-/* ========================================================================== */
-
-int
-connected_components(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_size)
-{
-	if (!matrix || matrix->nrows == 0)
-		return 0;
-
-	if (mpi_size == 1)
-		return connected_components_omp(matrix);
-
-	return connected_components_mpi(matrix, mpi_rank, mpi_size);
 }
 
