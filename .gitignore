@@ -23,4 +23,6 @@ slurm-*.err
 .DS_Store
 .vscode/
 .idea/
+.clangd
+compile_commands.json
 
