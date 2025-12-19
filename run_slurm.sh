@@ -5,7 +5,7 @@
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=16
-#SBATCH --mem-per-cpu=2G
+#SBATCH --mem-per-cpu=1600M
 #SBATCH --mem-bind=local
 #SBATCH --output=benchmarks/rome-4-16-%j.out
 #SBATCH --error=err/slurm-%j.err
@@ -29,6 +29,6 @@ export RETRIES=10
 export MAWI="$SCRATCH/data/bin/mawi_201512020330.bin"
 export FRIENDSTER="${SCRATCH}/data/bin/com-Friendster.bin"
 
-srun --mpi=pmix --cpu-bind=cores ./bin/connected_components_mpi \
+srun --mpi=pmix --cpu-bind=cores --distribution=block:block ./bin/connected_components_mpi \
   -n "${RETRIES}" "${FRIENDSTER}"
 
