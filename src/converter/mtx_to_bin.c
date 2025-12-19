@@ -5,15 +5,22 @@
  * Usage: ./mtx_to_bin input.mtx output.bin
  *
  * Parallelized with OpenMP for faster conversion of large graphs.
- * 
+ *
  * Binary format:
  *   Header:
  *     - uint32_t nrows       : Number of rows
- *     - uint32_t ncols       : Number of columns  
+ *     - uint32_t ncols       : Number of columns
  *     - size_t   nnz         : Number of non-zeros
  *   CSC data:
  *     - uint32_t col_ptr[ncols + 1] : Column pointers (offsets)
  *     - uint32_t row_idx[nnz]       : Row indices
+ *
+ * IMPORTANT:
+ *   For MatrixMarket "symmetric", we EXPAND to explicit adjacency:
+ *     - store (i,j)
+ *     - and if (i != j) also store (j,i)
+ *
+ * This makes downstream adjacency-based algorithms correct.
  */
 #include <ctype.h>
 #include <errno.h>
@@ -28,12 +35,6 @@
 /*                            Helper Functions                               */
 /* ------------------------------------------------------------------------- */
 
-/**
- * @brief Skip comment lines and whitespace in Matrix Market file.
- *
- * @param f File pointer to Matrix Market file
- * @return 0 on success
- */
 static int
 mm_skip_comments(FILE *f)
 {
@@ -54,16 +55,6 @@ mm_skip_comments(FILE *f)
 	}
 }
 
-/**
- * @brief Print conversion progress with rate and ETA estimation.
- *
- * Displays progress every 100M edges or at completion. Calculates
- * processing rate and estimates time remaining based on elapsed time.
- *
- * @param current Number of edges processed so far
- * @param total Total number of edges to process
- * @param start_time Start time from omp_get_wtime()
- */
 static void
 print_progress(size_t current, size_t total, double start_time)
 {
@@ -98,11 +89,9 @@ main(int argc, char **argv)
 
 	const char *infile = argv[1];
 	const char *outfile = argv[2];
-	
-	/* Use high-resolution OpenMP timer for accurate performance measurement */
+
 	double start_time = omp_get_wtime();
 
-	/* --- Open input ---------------------------------------------------- */
 	FILE *fin = fopen(infile, "r");
 	if (!fin) {
 		perror("fopen input");
@@ -163,17 +152,21 @@ main(int argc, char **argv)
 		num_threads = omp_get_num_threads();
 	}
 
-	fprintf(stderr, "Matrix: %zu x %zu, NNZ: %zu\n", nrows, ncols, nnz);
+	fprintf(stderr, "Matrix: %zu x %zu, NNZ (file): %zu\n", nrows, ncols, nnz);
 	fprintf(stderr, "Using %d OpenMP threads\n", num_threads);
 
 	/* --- Allocate COO arrays ------------------------------------------- */
-	size_t max_nnz = nnz * (symmetric ? 2 : 1);
+	/* Symmetric MM may be triangle-only; we EXPAND to explicit adjacency. */
+	size_t max_nnz = nnz * 2;
+
 	uint32_t *coo_i = malloc(max_nnz * sizeof(uint32_t));
 	uint32_t *coo_j = malloc(max_nnz * sizeof(uint32_t));
 
 	if (!coo_i || !coo_j) {
 		fprintf(stderr, "Error: malloc failed\n");
 		fclose(fin);
+		free(coo_i);
+		free(coo_j);
 		return 1;
 	}
 
@@ -204,16 +197,18 @@ main(int argc, char **argv)
 			}
 
 			if (val != 0.0) {
-				/* Store the edge (i-1, j-1) - MatrixMarket uses 1-based indexing */
-				coo_i[count] = i - 1;
-				coo_j[count] = j - 1;
+				uint32_t a = (uint32_t)(i - 1);
+				uint32_t b = (uint32_t)(j - 1);
+
+				/* Store (a,b) */
+				coo_i[count] = a;
+				coo_j[count] = b;
 				count++;
 
-				/* For symmetric matrices, also store the transpose edge (j-1, i-1)
-				 * unless it's a diagonal entry (i == j), which would be redundant */
-				if (symmetric && i != j) {
-					coo_i[count] = j - 1;
-					coo_j[count] = i - 1;
+				/* Expand symmetric: store (b,a) if off-diagonal */
+				if (a != b) {
+					coo_i[count] = b;
+					coo_j[count] = a;
 					count++;
 				}
 			}
@@ -222,8 +217,8 @@ main(int argc, char **argv)
 		}
 	} else {
 		/* array format */
-		for (size_t j = 0; j < ncols; j++) {
-			for (size_t i = 0; i < nrows; i++) {
+		for (size_t jj = 0; jj < ncols; jj++) {
+			for (size_t ii = 0; ii < nrows; ii++) {
 				double val;
 				if (fscanf(fin, "%lf", &val) != 1) {
 					fprintf(stderr, "Error: bad array entry\n");
@@ -231,12 +226,21 @@ main(int argc, char **argv)
 				}
 
 				if (val != 0.0) {
-					coo_i[count] = i;
-					coo_j[count] = j;
+					uint32_t a = (uint32_t)ii;
+					uint32_t b = (uint32_t)jj;
+
+					coo_i[count] = a;
+					coo_j[count] = b;
 					count++;
+
+					if (a != b) {
+						coo_i[count] = b;
+						coo_j[count] = a;
+						count++;
+					}
 				}
 
-				print_progress(i + j * nrows + 1, nnz, start_time);
+				print_progress(ii + jj * nrows + 1, nnz, start_time);
 			}
 		}
 	}
@@ -248,7 +252,8 @@ main(int argc, char **argv)
 	}
 
 	fclose(fin);
-	fprintf(stderr, "\nRead %zu edges\n", count);
+	fin = NULL;
+	fprintf(stderr, "\nRead %zu edges (expanded symmetric)\n", count);
 
 	/* --- Convert COO to CSC -------------------------------------------- */
 	fprintf(stderr, "Converting to CSC format...\n");
@@ -260,33 +265,22 @@ main(int argc, char **argv)
 		goto cleanup;
 	}
 
-	/* Count entries per column
-	 *
-	 * Strategy: Each thread maintains a thread-local histogram to avoid
-	 * contention. After counting, thread-local histograms are reduced
-	 * into the global col_ptr array using a critical section.
-	 */
 	#pragma omp parallel
 	{
-		/* Allocate thread-local histogram for this thread's counts */
 		uint32_t *local_counts = calloc(ncols + 1, sizeof(uint32_t));
 		if (!local_counts) {
 			fprintf(stderr, "Error: thread-local malloc failed\n");
 			exit(1);
 		}
 
-		/* Each thread processes its share of edges independently */
 		#pragma omp for schedule(static)
-		for (size_t k = 0; k < count; k++) {
+		for (size_t k = 0; k < count; k++)
 			local_counts[coo_j[k] + 1]++;
-		}
 
-		/* Reduce thread-local counts into global col_ptr */
 		#pragma omp critical
 		{
-			for (size_t j = 0; j <= ncols; j++) {
+			for (size_t j = 0; j <= ncols; j++)
 				col_ptr[j] += local_counts[j];
-			}
 		}
 
 		free(local_counts);
@@ -295,42 +289,28 @@ main(int argc, char **argv)
 	for (size_t j = 0; j < ncols; j++)
 		col_ptr[j + 1] += col_ptr[j];
 
-	/* Sanity: last entry must equal nnz count */
 	if ((size_t)col_ptr[ncols] != count) {
 		fprintf(stderr, "Error: col_ptr[ncols]=%u but nnz(count)=%zu\n",
 		        col_ptr[ncols], count);
-		free(col_ptr);
-		free(row_idx);
 		goto cleanup;
 	}
 
-	/* Fill row indices - PARALLELIZED with atomic operations
-	 *
-	 * Strategy: Process edges in parallel, using atomic operations to safely
-	 * coordinate writes to the shared col_fill array. Each thread increments
-	 * col_fill[j] atomically to claim its position in the output for column j.
-	 */
 	uint32_t *col_fill = calloc(ncols, sizeof(uint32_t));
 	if (!col_fill) {
 		fprintf(stderr, "Error: malloc failed\n");
-		free(col_ptr);
-		free(row_idx);
 		goto cleanup;
 	}
 
 	#pragma omp parallel
 	{
-		/* Each thread processes its portion of edges */
 		#pragma omp for schedule(static)
 		for (size_t k = 0; k < count; k++) {
 			uint32_t j = coo_j[k];
-			
-			/* Atomically claim a position in the output array for column j */
+
 			uint32_t dest;
 			#pragma omp atomic capture
 			dest = col_fill[j]++;
-			
-			/* Calculate final position: column start + offset within column */
+
 			dest += col_ptr[j];
 			row_idx[dest] = coo_i[k];
 		}
@@ -351,10 +331,9 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	uint32_t nrows_u32 = nrows;
-	uint32_t ncols_u32 = ncols;
+	uint32_t nrows_u32 = (uint32_t)nrows;
+	uint32_t ncols_u32 = (uint32_t)ncols;
 
-	/* write header */
 	if (fwrite(&nrows_u32, sizeof(uint32_t), 1, fout) != 1 ||
 	    fwrite(&ncols_u32, sizeof(uint32_t), 1, fout) != 1 ||
 	    fwrite(&count, sizeof(size_t), 1, fout) != 1)
@@ -366,7 +345,6 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	/* write col_ptr */
 	if (fwrite(col_ptr, sizeof(uint32_t), ncols + 1, fout) != ncols + 1) {
 		perror("fwrite col_ptr");
 		fclose(fout);
@@ -375,8 +353,7 @@ main(int argc, char **argv)
 		return 1;
 	}
 
-	/* Write row_idx in chunks for better performance */
-	size_t chunk_size = 100000000; /* 100M entries at a time */
+	size_t chunk_size = 100000000;
 	size_t written = 0;
 	while (written < count) {
 		size_t to_write = (count - written < chunk_size) ?
@@ -401,19 +378,19 @@ main(int argc, char **argv)
 	free(row_idx);
 
 	double end_time = omp_get_wtime();
-	double total_time = end_time - start_time;
-
 	fprintf(stderr, "\n\nConversion complete!\n");
-	fprintf(stderr, "Total time: %.2f seconds\n", total_time);
+	fprintf(stderr, "Total time: %.2f seconds\n", end_time - start_time);
 	fprintf(stderr, "Output file: %s\n", outfile);
 
 	return 0;
 
 cleanup:
+	if (fin)
+		fclose(fin);
 	free(col_ptr);
 	free(row_idx);
-	fclose(fin);
 	free(coo_i);
 	free(coo_j);
 	return 1;
 }
+

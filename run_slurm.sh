@@ -26,8 +26,9 @@ export OMP_STACKSIZE=256M
 
 # App args
 export RETRIES=10
-export FILEPATH="${SCRATCH}/data/bin/com-Friendster.bin"
+export MAWI="$SCRATCH/data/bin/mawi_201512020330.bin"
+export FRIENDSTER="${SCRATCH}/data/bin/com-Friendster.bin"
 
 srun --mpi=pmix --cpu-bind=cores ./bin/connected_components_mpi \
-  -n "${RETRIES}" "${FILEPATH}"
+  -n "${RETRIES}" "${FRIENDSTER}"
 
