@@ -4,7 +4,8 @@
   <img src="https://img.shields.io/badge/parallelism-MPI%20%2B%20OpenMP-blue" alt="MPI + OpenMP">
 </p>
 
-Assignment #2 for the Parallel and Distributed Systems course.
+Assignment #2 of the **Parallel and Distributed Systems** coursework:
+[parallel-distributed-systems](https://github.com/dimgerasimou/parallel-distributed-systems)
 
 A **distributed-memory connected components** implementation for massive sparse graphs, designed for modern **HPC systems** using **MPI + OpenMP**.
 
