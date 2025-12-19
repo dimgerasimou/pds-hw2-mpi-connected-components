@@ -1,0 +1,26 @@
+# Build artifacts
+bin/
+obj/
+*.o
+*.a
+*.so
+*.out
+
+# Benchmark / runtime output
+benchmarks/
+*.json
+*.log
+slurm-*.out
+slurm-*.err
+
+# Generated graph files
+*.bin
+
+# Temporary / editor files
+*.tmp
+*.swp
+*~
+.DS_Store
+.vscode/
+.idea/
+
