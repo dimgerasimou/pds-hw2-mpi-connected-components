@@ -56,7 +56,7 @@ main(int argc, char *argv[])
 	
 	/* Load the sparse matrix - distributed across ranks */
 	double t_load_start = now_sec();
-	matrix = csc_load_matrix_distributed(filepath, mpi_rank, mpi_size);
+	matrix = csc_load_matrix(filepath, mpi_rank, mpi_size);
 	double t_load_end = now_sec();
 	
 	if (!matrix) {
