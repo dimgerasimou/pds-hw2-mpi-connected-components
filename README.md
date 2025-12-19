@@ -1,7 +1,7 @@
 # Connected Components — Distributed-Memory (MPI) Implementation
 
 <p align="center">
-  <img src="https://img.shields.io/badge/parallelism-MPI%20%2B%20OpenMP-blueviolet" alt="MPI + OpenMP">
+  <img src="https://img.shields.io/badge/parallelism-MPI%20%2B%20OpenMP-blue" alt="MPI + OpenMP">
 </p>
 
 Assignment #2 for the Parallel and Distributed Systems course.
