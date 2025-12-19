@@ -23,7 +23,6 @@
  * This makes downstream adjacency-based algorithms correct.
  */
 #include <ctype.h>
-#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -32,7 +31,7 @@
 #include <omp.h>
 
 /* ------------------------------------------------------------------------- */
-/*                            Helper Functions                               */
+/*                            Static Helper Functions                        */
 /* ------------------------------------------------------------------------- */
 
 static int
@@ -73,7 +72,7 @@ print_progress(size_t current, size_t total, double start_time)
 }
 
 /* ------------------------------------------------------------------------- */
-/*                            Main Conversion                                */
+/*                            Program Entry Point                            */
 /* ------------------------------------------------------------------------- */
 
 int

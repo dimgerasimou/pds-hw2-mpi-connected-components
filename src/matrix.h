@@ -35,9 +35,9 @@ typedef struct {
  *
  * Partition strategy: Block distribution of columns across ranks.
  *
- * @param path Path to the matrix file (.bin format required).
- * @param mpi_rank Current MPI rank.
- * @param mpi_size Total number of MPI ranks.
+ * @param[in] path     Path to the matrix file (.bin format required).
+ * @param[in] mpi_rank Current MPI rank.
+ * @param[in] mpi_size Total number of MPI ranks.
  * @return Newly allocated CSCBinaryMatrix (local partition), or NULL on failure.
  *
  * @note The returned matrix must be freed using csc_free_matrix().
@@ -49,7 +49,7 @@ CSCBinaryMatrix *csc_load_matrix(const char *path, int mpi_rank, int mpi_size);
  *
  * Safe to call with NULL.
  *
- * @param m CSC matrix to free.
+ * @param[in,out] m CSC matrix to free.
  */
 void csc_free_matrix(CSCBinaryMatrix *m);
 

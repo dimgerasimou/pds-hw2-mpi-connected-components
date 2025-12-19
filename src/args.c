@@ -2,8 +2,8 @@
  * @file args.c
  * @brief Command-line argument parsing implementation.
  *
- * Provides functions to parse program arguments that specify
- * the number of trials, and input file path.
+ * Provides functions to parse program arguments such as the number of
+ * benchmark trials and the input matrix filepath.
  */
 
 #define _POSIX_C_SOURCE 200809L
@@ -11,13 +11,16 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "args.h"
 #include "error.h"
 
 extern const char *program_name;
+
+/* ------------------------------------------------------------------------- */
+/*                            Static Helper Functions                        */
+/* ------------------------------------------------------------------------- */
 
 /**
  * @brief Checks if a string represents an unsigned integer.
@@ -40,9 +43,10 @@ isuint(const char *s)
 }
 
 /**
- * @brief Prints program usage instructions to stdout.
+ * @brief Prints program usage instructions.
  *
  * Displays the valid command-line options and their expected arguments.
+ * Output is written to stderr.
  */
 static void
 usage(void) {
@@ -52,12 +56,16 @@ usage(void) {
 		"  -n <trials>        Number of benchmark trials (default: 3)\n"
 		"  -h                 Show this help message and exit\n\n"
 		"Arguments:\n"
-		"  matrix_file Path to the input matrix file (Matrix Market format)\n\n"
+		"  matrix_file Path to the input matrix file (.bin CSC format)\n\n"
 		"Example:\n"
-		"  %s -n 10 ./data/matrix.mat\n",
+		"  %s -n 10 ./data/graph.bin\n",
 		program_name, program_name
 	);
 }
+
+/* ------------------------------------------------------------------------- */
+/*                            Public API Functions                           */
+/* ------------------------------------------------------------------------- */
 
 /**
  * @brief Parses command-line arguments.
@@ -105,7 +113,7 @@ parseargs(int argc, char *argv[], unsigned int *n_trials, char **filepath)
 		case 'h':
 			usage();
 			return -1;
-		
+
 		case '?':
 		default: {
 			char err[128];

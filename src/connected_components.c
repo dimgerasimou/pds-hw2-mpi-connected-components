@@ -24,6 +24,10 @@
 
 #include "connected_components.h"
 
+/* ------------------------------------------------------------------------- */
+/*                            Static Helper Functions                        */
+/* ------------------------------------------------------------------------- */
+
 static inline uint32_t
 min_u32(uint32_t a, uint32_t b)
 {
@@ -42,12 +46,16 @@ compute_partition_u32(uint32_t n, int mpi_size, int mpi_rank,
 	*local_n = base + (mpi_rank < (int)rem ? 1u : 0u);
 }
 
+/* ------------------------------------------------------------------------- */
+/*                            Public API Functions                           */
+/* ------------------------------------------------------------------------- */
+
 int
 connected_components(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_size)
 {
 	if (!matrix || matrix->nrows == 0)
 		return 0;
-	
+
 	const uint32_t n = (uint32_t)matrix->ncols_global;
 
 	uint32_t global_offset, local_n;

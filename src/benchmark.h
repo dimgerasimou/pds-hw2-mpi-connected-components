@@ -10,8 +10,8 @@
 
 /**
  * @struct Statistics
- * @brief Statistical summary of benchmark timing results
- * 
+ * @brief Statistical summary of benchmark timing results.
+ *
  * Provides comprehensive timing statistics computed across multiple
  * benchmark trials.
  */
@@ -25,8 +25,8 @@ typedef struct {
 
 /**
  * @struct Result
- * @brief Complete benchmark result for a single algorithm
- * 
+ * @brief Complete benchmark result for a single algorithm.
+ *
  * Contains all measured and computed metrics for one algorithm implementation.
  */
 typedef struct {
@@ -37,8 +37,8 @@ typedef struct {
 
 /**
  * @struct SystemInfo
- * @brief System information captured during benchmark execution
- * 
+ * @brief System information captured during benchmark execution.
+ *
  * Contains details about the hardware and system configuration where
  * the benchmark was executed.
  */
@@ -51,8 +51,8 @@ typedef struct {
 
 /**
  * @struct MatrixInfo
- * @brief Information about the input matrix/graph
- * 
+ * @brief Information about the input matrix/graph.
+ *
  * Describes the sparse matrix used as input for the connected
  * components algorithm, including its dimensions and sparsity.
  */
@@ -66,8 +66,8 @@ typedef struct {
 
 /**
  * @struct BenchmarkInfo
- * @brief Benchmark execution parameters
- * 
+ * @brief Benchmark execution parameters.
+ *
  * Contains the configuration parameters used for running the benchmark.
  */
 typedef struct {
@@ -99,9 +99,9 @@ double now_sec(void);
  * Allocates and populates a new Benchmark instance for the specified
  * algorithm and dataset. Also allocates memory for timing results.
  *
- * @param filepath Path to the dataset file.
- * @param n_trials Number of trials to run.
- * @param mat Pointer to the CSCBinaryMatrix used as input.
+ * @param[in] filepath Path to the dataset file.
+ * @param[in] n_trials Number of trials to run.
+ * @param[in] mat      Pointer to the CSCBinaryMatrix used as input.
  *
  * @return Pointer to a newly allocated Benchmark structure, or `NULL` on failure.
  */
@@ -110,7 +110,7 @@ Benchmark* benchmark_init(const char *filepath, const unsigned int n_trials, con
 /**
  * @brief Frees a Benchmark structure and all allocated resources.
  *
- * @param b Pointer to the Benchmark structure to free. Safe to call with NULL.
+ * @param[in,out] b Pointer to the Benchmark structure to free. Safe to call with NULL.
  */
 void benchmark_free(Benchmark *b);
 
@@ -119,10 +119,10 @@ void benchmark_free(Benchmark *b);
  *
  * MPI-aware version that synchronizes timing across ranks and aggregates results.
  *
- * @param m Input CSCBinaryMatrix (local partition).
- * @param b Benchmark object containing configuration and result storage.
- * @param mpi_rank Current MPI rank.
- * @param mpi_size Total number of MPI ranks.
+ * @param[in]     m        Input CSCBinaryMatrix (local partition).
+ * @param[in,out] b        Benchmark object containing configuration and result storage.
+ * @param[in]     mpi_rank Current MPI rank.
+ * @param[in]     mpi_size Total number of MPI ranks.
  *
  * @return
  * - `0` on success,
@@ -137,7 +137,7 @@ int benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_s
  * Outputs benchmark metadata, timing statistics, system information,
  * and matrix properties in JSON form for easy parsing or logging.
  *
- * @param b Pointer to the Benchmark structure with populated data.
+ * @param[in] b Pointer to the Benchmark structure with populated data.
  */
 void benchmark_print(Benchmark *b);
 

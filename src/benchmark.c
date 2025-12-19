@@ -247,20 +247,20 @@ benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size)
 	for (unsigned int i = 0; i < b->benchmark_info.trials; i++) {
 		/* Synchronize all ranks before starting */
 		MPI_Barrier(MPI_COMM_WORLD);
-		
+
 		double start_time = now_sec();
 		result = connected_components(m, mpi_rank, mpi_size);
 		double end_time = now_sec();
-		
+
 		/* Synchronize all ranks after finishing */
 		MPI_Barrier(MPI_COMM_WORLD);
-		
+
 		/* Use the maximum time across all ranks for accurate measurement */
 		double local_time = end_time - start_time;
 		double max_time;
-		MPI_Reduce(&local_time, &max_time, 1, MPI_DOUBLE, MPI_MAX, 
+		MPI_Reduce(&local_time, &max_time, 1, MPI_DOUBLE, MPI_MAX,
 		           0, MPI_COMM_WORLD);
-		
+
 		if (mpi_rank == 0) {
 			b->times[i] = max_time;
 		}
@@ -271,7 +271,7 @@ benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size)
 			}
 			return 1;
 		}
-		
+
 		if (i == 0) {
 			b->result.connected_components = result;
 		}
@@ -301,7 +301,7 @@ benchmark_print(Benchmark *b)
 	if (!b) return;
 
 	calculate_time_statistics(b);
-	
+
 	get_iso_timestamp(b);
 	get_cpu_info(b);
 	get_memory_info(b);

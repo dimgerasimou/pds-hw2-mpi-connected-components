@@ -1,10 +1,9 @@
 /**
  * @file json.c
- * @brief Minimal JSON printer for benchmark output
+ * @brief Minimal JSON printer for benchmark output.
  */
 
 #include <stdio.h>
-#include <string.h>
 
 #include "json.h"
 

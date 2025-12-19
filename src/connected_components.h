@@ -16,10 +16,11 @@
  *
  * Multi-process version using MPI + OpenMP hybrid parallelization.
  *
- * @param matrix Local CSC partition (this rank's columns only)
- * @param mpi_rank Current MPI rank
- * @param mpi_size Total number of MPI ranks
- * @return Number of connected components, or -1 on error
+ * @param[in] matrix   Local CSC partition (this rank's columns only).
+ * @param[in] mpi_rank Current MPI rank.
+ * @param[in] mpi_size Total number of MPI ranks.
+ *
+ * @return Number of connected components, or -1 on error.
  */
 int connected_components(const CSCBinaryMatrix *matrix, int mpi_rank, int mpi_size);
 

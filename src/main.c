@@ -14,7 +14,6 @@
  */
 
 #include <mpi.h>
-#include "connected_components.h"
 #include "matrix.h"
 #include "error.h"
 #include "args.h"
@@ -53,12 +52,12 @@ main(int argc, char *argv[])
 		MPI_Finalize();
 		return 1;
 	}
-	
+
 	/* Load the sparse matrix - distributed across ranks */
 	double t_load_start = now_sec();
 	matrix = csc_load_matrix(filepath, mpi_rank, mpi_size);
 	double t_load_end = now_sec();
-	
+
 	if (!matrix) {
 		if (mpi_rank == 0) {
 			print_error(__func__, "Failed to load matrix", 0);
@@ -77,19 +76,19 @@ main(int argc, char *argv[])
 	benchmark->matrix_info.load_time_s = t_load_end - t_load_start;
 	benchmark->benchmark_info.mpi_ranks = mpi_size;
 	benchmark->benchmark_info.mpi_rank = mpi_rank;
-	
+
 	/* For multi-rank: gather global matrix dimensions */
 	if (mpi_size > 1) {
 		/* Gather total columns across all ranks */
 		unsigned int local_cols = matrix->ncols;
 		unsigned int total_cols = 0;
 		MPI_Reduce(&local_cols, &total_cols, 1, MPI_UNSIGNED, MPI_SUM, 0, MPI_COMM_WORLD);
-		
+
 		/* Gather total nnz across all ranks */
 		unsigned int local_nnz = matrix->nnz;
 		unsigned int total_nnz = 0;
 		MPI_Reduce(&local_nnz, &total_nnz, 1, MPI_UNSIGNED, MPI_SUM, 0, MPI_COMM_WORLD);
-		
+
 		if (mpi_rank == 0) {
 			benchmark->matrix_info.cols = total_cols;
 			benchmark->matrix_info.nnz = total_nnz;
@@ -108,7 +107,7 @@ main(int argc, char *argv[])
 	/* Cleanup */
 	benchmark_free(benchmark);
 	csc_free_matrix(matrix);
-	
+
 	MPI_Finalize();
 	return ret;
 }
