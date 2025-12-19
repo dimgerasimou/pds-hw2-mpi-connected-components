@@ -98,7 +98,7 @@ main(int argc, char *argv[])
 	}
 
 	/* Actually run the benchmark */
-	ret = benchmark_cc_mpi(matrix, benchmark, mpi_rank, mpi_size);
+	ret = benchmark_cc(matrix, benchmark, mpi_rank, mpi_size);
 
 	/* Only rank 0 prints results */
 	if (mpi_rank == 0) {

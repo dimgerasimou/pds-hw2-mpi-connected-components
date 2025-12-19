@@ -115,22 +115,6 @@ Benchmark* benchmark_init(const char *filepath, const unsigned int n_trials, con
 void benchmark_free(Benchmark *b);
 
 /**
- * @brief Runs a connected components benchmark (single-process version).
- *
- * Executes the provided connected components function multiple times,
- * measuring execution time per trial and verifying consistency of results.
- *
- * @param m Input CSCBinaryMatrix.
- * @param b Benchmark object containing configuration and result storage.
- *
- * @return
- * - `0` on success,
- * - `1` on algorithm failure or invalid data,
- * - `2` if results differ between trials.
- */
-int benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b);
-
-/**
  * @brief Runs a connected components benchmark (MPI version).
  *
  * MPI-aware version that synchronizes timing across ranks and aggregates results.
@@ -145,7 +129,7 @@ int benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b);
  * - `1` on algorithm failure or invalid data,
  * - `2` if results differ between trials.
  */
-int benchmark_cc_mpi(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size);
+int benchmark_cc(const CSCBinaryMatrix *m, Benchmark *b, int mpi_rank, int mpi_size);
 
 /**
  * @brief Prints benchmark results in structured JSON format.
