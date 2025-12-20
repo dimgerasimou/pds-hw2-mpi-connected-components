@@ -4,7 +4,6 @@ obj/
 *.o
 *.a
 *.so
-*.out
 
 # Benchmark / runtime output
 benchmarks/

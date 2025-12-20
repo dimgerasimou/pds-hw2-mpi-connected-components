@@ -1,0 +1,34 @@
+{
+  "sys_info": {
+    "timestamp": "2025-12-19T20:39:07",
+    "cpu_info": "AMD EPYC 7662 64-Core Processor",
+    "ram_mb": 257114.26,
+    "swap_mb": 8192.00
+  },
+  "matrix_info": {
+    "path": "/scratch/g/gerasimou/data/bin/com-Friendster.bin",
+    "rows": 65608366,
+    "cols": 65608366,
+    "nnz": 3612134270,
+    "load_time_s": 5.160327
+  },
+  "benchmark_info": {
+    "threads_per_rank": 128,
+    "mpi_ranks": 1,
+    "total_cores": 128,
+    "trials": 3
+  },
+  "results": [
+    {
+      "connected_components": 1,
+      "statistics": {
+        "mean_time_s": 101.486035,
+        "std_dev_s": 3.769425,
+        "median_time_s": 100.281068,
+        "min_time_s": 98.466419,
+        "max_time_s": 105.710618
+      },
+      "throughput_edges_per_sec": 35592426.78
+    }
+  ]
+}

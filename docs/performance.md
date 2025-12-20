@@ -2,6 +2,19 @@
 
 This report summarizes the benchmark runs produced by the current implementation.
 
+## How to read the output filenames
+
+Each benchmark output uses the format:
+
+`rome-nnodes-ntasks_per_node-ncores_per_task-matrix_name-job_no.out`
+
+Where:
+- `nnodes`: number of nodes
+- `ntasks_per_node`: MPI ranks per node
+- `ncores_per_task`: OpenMP threads per rank
+- `matrix_name`: input graph/matrix
+- `job_no`: Slurm job id
+
 ## Benchmark environment
 
 All benchmarking has been done on the “Aristotelis” HPC cluster, of the Aristotle University of Thessaloniki.
