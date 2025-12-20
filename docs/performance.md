@@ -19,6 +19,8 @@ Where:
 
 All benchmarking has been done on the “Aristotelis” HPC cluster, of the Aristotle University of Thessaloniki.
 
+However there were not enough available resources for comprehersive testing.
+
 - **System tag:** `rome`
 - **CPU:** AMD EPYC 7662 64-Core Processor
 - **Memory (per node):** 256 GiB
@@ -85,6 +87,7 @@ All benchmarking has been done on the “Aristotelis” HPC cluster, of the Aris
 |               2 |              8 |               16 |         256 |        15.957 |                 226.4 |         2.47  |
 |               4 |              1 |               64 |         256 |        24.593 |                 146.9 |         0.815 |
 |               4 |              2 |               64 |         512 |         9.483 |                 380.9 |         2.406 |
+|               8 |              1 |               64 |         512 |        19.266 |                 187.5 |         2.082 |
 |               8 |              2 |               64 |        1024 |         6.397 |                 564.7 |         0.212 |
 
 </details>
@@ -142,6 +145,7 @@ All benchmarking has been done on the “Aristotelis” HPC cluster, of the Aris
 |               2 |              8 |               16 |         256 |        10.352 |                  46.4 |         0.044 |
 |               4 |              1 |               64 |         256 |        10.697 |                  44.9 |         0.17  |
 |               4 |              2 |               64 |         512 |        10.235 |                  46.9 |         0.199 |
+|               8 |              1 |               64 |         512 |        11.932 |                  40.2 |         0.075 |
 |               8 |              2 |               64 |        1024 |        10.542 |                  45.5 |         0.166 |
 
 </details>
