@@ -25,3 +25,15 @@ slurm-*.err
 .clangd
 compile_commands.json
 
+# LaTeX build artifacts
+docs/*.aux
+docs/*.log
+docs/*.out
+docs/*.toc
+docs/*.bbl
+docs/*.blg
+docs/*.fls
+docs/*.fdb_latexmk
+docs/*.synctex.gz
+docs/*.xdv
+docs/_minted
